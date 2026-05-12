@@ -1,9 +1,17 @@
+import 'dotenv/config';
+
 const BASE = process.env.MUSIC_API_URL || 'http://localhost:4000';
+const COOKIE = process.env.MUSIC_U ? `MUSIC_U=${process.env.MUSIC_U}` : '';
+
+function auth(url) {
+  if (!COOKIE) return url;
+  return url + (url.includes('?') ? '&' : '?') + 'cookie=' + COOKIE;
+}
 
 export async function search(keyword, limit = 5) {
   if (!keyword || !keyword.trim()) return [];
   try {
-    const url = `${BASE}/search?keywords=${encodeURIComponent(keyword)}&limit=${limit}`;
+    const url = auth(`${BASE}/search?keywords=${encodeURIComponent(keyword)}&limit=${limit}`);
     const res = await fetch(url);
     const data = await res.json();
     if (data.code !== 200 || !data.result?.songs) return [];
@@ -22,7 +30,7 @@ export async function search(keyword, limit = 5) {
 
 export async function getSongUrl(id) {
   try {
-    const url = `${BASE}/song/url?id=${id}`;
+    const url = auth(`${BASE}/song/url?id=${id}`);
     const res = await fetch(url);
     const data = await res.json();
     if (data.code === 200 && data.data?.[0]?.url) {
@@ -37,7 +45,7 @@ export async function getSongUrl(id) {
 
 export async function getLyric(id) {
   try {
-    const url = `${BASE}/lyric?id=${id}`;
+    const url = auth(`${BASE}/lyric?id=${id}`);
     const res = await fetch(url);
     const data = await res.json();
     if (data.code === 200 && data.lrc?.lyric) {
@@ -70,11 +78,10 @@ export async function loginByQR() {
 
 export async function checkLoginStatus() {
   try {
-    const res = await fetch(`${BASE}/login/status`);
+    const res = await fetch(auth(`${BASE}/login/status`));
     const data = await res.json();
-    if (data.code !== 200) return { loggedIn: false, profile: null };
-    if (data.data?.code === 803) {
-      return { loggedIn: true, profile: data.profile || null };
+    if (data.data?.code === 200 && data.data?.profile) {
+      return { loggedIn: true, profile: data.data.profile };
     }
     return { loggedIn: false, profile: null };
   } catch (err) {

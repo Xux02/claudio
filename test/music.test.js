@@ -150,9 +150,10 @@ describe('music.checkLoginStatus', () => {
   it('returns loggedIn=true with profile when logged in', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
       json: () => Promise.resolve({
-        code: 200,
-        data: { code: 803 },
-        profile: { userId: 12345, nickname: 'Xux02' },
+        data: {
+          code: 200,
+          profile: { userId: 12345, nickname: 'Xux02' },
+        },
       }),
     });
 
