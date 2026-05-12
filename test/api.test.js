@@ -26,6 +26,16 @@ describe('api module', () => {
       expect(result).toEqual({ say: '你好', play: [], reason: '', segue: '' });
     });
 
+    it('throws on non-ok response', async () => {
+      globalThis.fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: () => Promise.resolve({ error: 'bad request' }),
+      });
+
+      await expect(api.chat('')).rejects.toThrow('HTTP 400');
+    });
+
     it('throws on network error', async () => {
       globalThis.fetch.mockRejectedValueOnce(new Error('Network error'));
 
@@ -44,6 +54,21 @@ describe('api module', () => {
 
       expect(globalThis.fetch).toHaveBeenCalledWith('/api/now');
       expect(result.playing).toBe(true);
+    });
+
+    it('throws on non-ok response', async () => {
+      globalThis.fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+      });
+
+      await expect(api.getNow()).rejects.toThrow('HTTP 500');
+    });
+
+    it('throws on network error', async () => {
+      globalThis.fetch.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+
+      await expect(api.getNow()).rejects.toThrow('ECONNREFUSED');
     });
   });
 
@@ -69,6 +94,21 @@ describe('api module', () => {
 
       expect(globalThis.fetch).toHaveBeenCalledWith('/api/history?limit=10');
     });
+
+    it('throws on non-ok response', async () => {
+      globalThis.fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+      });
+
+      await expect(api.getHistory()).rejects.toThrow('HTTP 500');
+    });
+
+    it('throws on network error', async () => {
+      globalThis.fetch.mockRejectedValueOnce(new Error('timeout'));
+
+      await expect(api.getHistory()).rejects.toThrow('timeout');
+    });
   });
 
   describe('getTaste', () => {
@@ -82,6 +122,21 @@ describe('api module', () => {
 
       expect(globalThis.fetch).toHaveBeenCalledWith('/api/taste');
       expect(result.recentPlays).toBe(42);
+    });
+
+    it('throws on non-ok response', async () => {
+      globalThis.fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+      });
+
+      await expect(api.getTaste()).rejects.toThrow('HTTP 503');
+    });
+
+    it('throws on network error', async () => {
+      globalThis.fetch.mockRejectedValueOnce(new Error('offline'));
+
+      await expect(api.getTaste()).rejects.toThrow('offline');
     });
   });
 });
