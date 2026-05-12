@@ -214,11 +214,6 @@ app.get('/api/schedule', (req, res) => {
   }
 });
 
-// SPA fallback: serve index.html for non-API routes
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api/')) return next();
-  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
-});
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
