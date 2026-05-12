@@ -6,7 +6,6 @@ state.db-wal
 *.png
 *.jpg
 *.jpeg
-src/scheduler.js
-src/tts.js
+
 state/
 tts/
