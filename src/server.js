@@ -14,6 +14,26 @@ app.use(express.json());
 // Init database
 const db = initDb();
 
+// Shared helper: resolve Claude's song list to real search results with URLs
+async function resolvePlaylist(play) {
+  const enriched = [];
+  for (const song of play) {
+    const results = await musicSearch(`${song.title} ${song.artist || ''}`, 1);
+    if (results.length > 0) {
+      const url = await getSongUrl(results[0].id);
+      enriched.push({
+        title: results[0].title,
+        artist: results[0].artist,
+        url: url || undefined,
+        reason: song.reason,
+      });
+    } else {
+      enriched.push({ title: song.title, artist: song.artist || '', reason: song.reason });
+    }
+  }
+  return enriched;
+}
+
 // Root — simple welcome page
 app.get('/', (req, res) => {
   res.send(`<!DOCTYPE html>
@@ -57,10 +77,9 @@ app.post('/api/chat', async (req, res) => {
         .trim();
       const songs = await musicSearch(keyword || intent.payload, 5);
 
-      for (const song of songs) {
-        const url = await getSongUrl(song.id);
-        song.url = url || undefined;
-      }
+      await Promise.all(songs.map(async (song) => {
+        song.url = await getSongUrl(song.id) || undefined;
+      }));
 
       logMessage({ role: 'user', content: message });
       const say = songs.length > 0
@@ -169,22 +188,7 @@ app.post('/api/trigger', async (req, res) => {
 
     const result = await ask(ctx);
 
-    // Search real song URLs
-    const playWithUrls = [];
-    for (const song of result.play) {
-      const searchResults = await musicSearch(`${song.title} ${song.artist || ''}`, 1);
-      if (searchResults.length > 0) {
-        const url = await getSongUrl(searchResults[0].id);
-        playWithUrls.push({
-          title: searchResults[0].title,
-          artist: searchResults[0].artist,
-          url: url || undefined,
-          reason: song.reason,
-        });
-      } else {
-        playWithUrls.push({ title: song.title, artist: song.artist || '', reason: song.reason });
-      }
-    }
+    const playWithUrls = await resolvePlaylist(result.play);
 
     // Generate TTS
     const ttsPath = await synthesize(result.say);
@@ -218,6 +222,7 @@ app.get('/api/schedule', (req, res) => {
     const schedule = getSchedule();
     res.json({ schedule });
   } catch (err) {
+    console.error('/api/schedule error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -235,21 +240,7 @@ startScheduler(async (reason) => {
     const ctx = build({ trigger: reason, input: '', state });
     const result = await ask(ctx);
 
-    const playWithUrls = [];
-    for (const song of result.play) {
-      const searchResults = await musicSearch(`${song.title} ${song.artist || ''}`, 1);
-      if (searchResults.length > 0) {
-        const url = await getSongUrl(searchResults[0].id);
-        playWithUrls.push({
-          title: searchResults[0].title,
-          artist: searchResults[0].artist,
-          url: url || undefined,
-          reason: song.reason,
-        });
-      } else {
-        playWithUrls.push({ title: song.title, artist: song.artist || '', reason: song.reason });
-      }
-    }
+    const playWithUrls = await resolvePlaylist(result.play);
 
     const ttsPath = await synthesize(result.say);
 
