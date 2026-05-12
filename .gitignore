@@ -1,6 +1,8 @@
 node_modules/
 .env
 state.db
+state.db-shm
+state.db-wal
 *.png
 *.jpg
 *.jpeg

@@ -11,8 +11,25 @@ app.use(express.json());
 // Init database
 const db = initDb();
 
-// Static client files
-app.use(express.static('client'));
+// Root — simple welcome page
+app.get('/', (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>Claudio</title>
+<style>body{font-family:system-ui;max-width:600px;margin:80px auto;padding:20px;background:#1a1a2e;color:#e0d5c1}
+h1{color:#c9a87c}a{color:#c9a87c}code{background:#2a2a3e;padding:2px 6px;border-radius:4px}</style></head>
+<body>
+<h1>Claudio — 个人 AI 电台</h1>
+<p>API 已就绪。</p>
+<ul>
+<li><code>POST /api/chat</code> — 发送消息</li>
+<li><code>GET /api/now</code> — 当前播放</li>
+<li><code>GET /api/taste</code> — 品味统计</li>
+<li><code>GET /api/history</code> — 对话历史</li>
+</ul>
+<p>前端界面将在 Phase 3 上线。</p>
+</body></html>`);
+});
 
 // POST /api/chat — main interaction endpoint
 app.post('/api/chat', async (req, res) => {
