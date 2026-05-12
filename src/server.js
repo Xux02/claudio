@@ -16,22 +16,47 @@ const db = initDb();
 
 // Shared helper: resolve Claude's song list to real search results with URLs
 async function resolvePlaylist(play) {
-  const enriched = [];
-  for (const song of play) {
+  const enriched = await Promise.all(play.map(async (song) => {
     const results = await musicSearch(`${song.title} ${song.artist || ''}`, 1);
     if (results.length > 0) {
       const url = await getSongUrl(results[0].id);
-      enriched.push({
+      return {
         title: results[0].title,
         artist: results[0].artist,
         url: url || undefined,
         reason: song.reason,
-      });
-    } else {
-      enriched.push({ title: song.title, artist: song.artist || '', reason: song.reason });
+      };
     }
-  }
+    return { title: song.title, artist: song.artist || '', reason: song.reason };
+  }));
   return enriched;
+}
+
+// Shared helper: run full trigger pipeline (Claude → music → TTS → persist)
+async function runTrigger(reason) {
+  const state = { getRecentPlays };
+  const ctx = build({ trigger: reason, input: '', state });
+  const result = await ask(ctx);
+
+  const playWithUrls = await resolvePlaylist(result.play);
+  const ttsPath = await synthesize(result.say);
+
+  logMessage({
+    role: 'assistant',
+    content: result.say,
+    meta: { songs: playWithUrls, reason: result.reason, segue: result.segue },
+  });
+  for (const song of playWithUrls) {
+    logPlay({ song_id: song.id || null, title: song.title, artist: song.artist || '' });
+  }
+
+  return {
+    say: result.say,
+    play: playWithUrls,
+    reason: result.reason,
+    segue: result.segue,
+    tts: ttsPath,
+  };
 }
 
 // Root — simple welcome page
@@ -183,33 +208,8 @@ app.post('/api/trigger', async (req, res) => {
       return res.status(400).json({ error: 'reason is required' });
     }
 
-    const state = { getRecentPlays };
-    const ctx = build({ trigger: `手动触发: ${reason}`, input: '', state });
-
-    const result = await ask(ctx);
-
-    const playWithUrls = await resolvePlaylist(result.play);
-
-    // Generate TTS
-    const ttsPath = await synthesize(result.say);
-
-    // Persist
-    logMessage({
-      role: 'assistant',
-      content: result.say,
-      meta: { songs: playWithUrls, reason: result.reason, segue: result.segue },
-    });
-    for (const song of playWithUrls) {
-      logPlay({ song_id: song.id || null, title: song.title, artist: song.artist || '' });
-    }
-
-    return res.json({
-      say: result.say,
-      play: playWithUrls,
-      reason: result.reason,
-      segue: result.segue,
-      tts: ttsPath,
-    });
+    const result = await runTrigger(`手动触发: ${reason}`);
+    return res.json(result);
   } catch (err) {
     console.error('/api/trigger error:', err);
     return res.status(500).json({ error: err.message });
@@ -236,26 +236,10 @@ app.listen(PORT, () => {
 startScheduler(async (reason) => {
   console.log(`[scheduler] Triggered: ${reason}`);
   try {
-    const state = { getRecentPlays };
-    const ctx = build({ trigger: reason, input: '', state });
-    const result = await ask(ctx);
-
-    const playWithUrls = await resolvePlaylist(result.play);
-
-    const ttsPath = await synthesize(result.say);
-
-    logMessage({
-      role: 'assistant',
-      content: result.say,
-      meta: { songs: playWithUrls, reason: result.reason, segue: result.segue },
-    });
-    for (const song of playWithUrls) {
-      logPlay({ song_id: song.id || null, title: song.title, artist: song.artist || '' });
-    }
-
+    const result = await runTrigger(reason);
     console.log(`[scheduler] DJ says: ${result.say.slice(0, 50)}...`);
-    console.log(`[scheduler] TTS: ${ttsPath || 'none'}`);
-    console.log(`[scheduler] Songs: ${playWithUrls.map(s => s.title).join(', ')}`);
+    console.log(`[scheduler] TTS: ${result.tts || 'none'}`);
+    console.log(`[scheduler] Songs: ${result.play.map(s => s.title).join(', ')}`);
   } catch (err) {
     console.error('[scheduler] Error:', err.message);
   }
