@@ -13,17 +13,18 @@ export function route(message) {
     return { type: 'direct', payload: '你好，我是 Claudio，想听点什么吗？' };
   }
 
-  // Check direct keywords first
-  for (const kw of DIRECT_KEYWORDS) {
-    if (trimmed.includes(kw)) {
-      return { type: 'direct', payload: trimmed };
-    }
-  }
-
-  // Check music intent
+  // Check music intent first (before direct) to avoid substring
+  // collisions, e.g. '早' in '来首早安歌' or '晚安' in '播放晚安曲'
   for (const kw of MUSIC_KEYWORDS) {
     if (trimmed.includes(kw)) {
       return { type: 'music', payload: trimmed };
+    }
+  }
+
+  // Check direct keywords
+  for (const kw of DIRECT_KEYWORDS) {
+    if (trimmed.includes(kw)) {
+      return { type: 'direct', payload: trimmed };
     }
   }
 
