@@ -51,7 +51,7 @@ app.post('/api/chat', async (req, res) => {
     logMessage({
       role: 'assistant',
       content: result.say,
-      meta: JSON.stringify({ songs: result.play, reason: result.reason, segue: result.segue }),
+      meta: { songs: result.play, reason: result.reason, segue: result.segue },
     });
     for (const song of result.play) {
       logPlay({ title: song.title, artist: song.artist || '' });
