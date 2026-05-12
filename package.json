@@ -1,0 +1,19 @@
+{
+  "name": "claudio",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Personal AI radio station - local brain with Claude CLI",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.0"
+  }
+}
