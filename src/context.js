@@ -28,9 +28,9 @@ function readFile(relPath) {
  * @param {string} [opts.trigger] - What triggered this call
  * @param {string} [opts.input] - User message or tool result
  * @param {Object} [opts.state] - state.js module for memory fetching
- * @returns {Promise<{persona: string, taste: string, env: string, memory: string, input: string, trigger: string}>}
+ * @returns {{persona: string, taste: string, env: string, memory: string, input: string, trigger: string}}
  */
-export async function build({ trigger = '', input = '', state = null } = {}) {
+export function build({ trigger = '', input = '', state = null } = {}) {
   // 1. DJ persona
   const persona = readFile('prompts/dj-persona.md');
 
