@@ -4,6 +4,7 @@ state.db
 state.db-shm
 state.db-wal
 *.png
+!public/icons/*.png
 *.jpg
 *.jpeg
 
