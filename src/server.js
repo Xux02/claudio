@@ -42,7 +42,7 @@ app.post('/api/chat', async (req, res) => {
 
     // claude intent
     const state = { getRecentPlays };
-    const ctx = await build({ trigger: 'chat', input: intent.payload, state });
+    const ctx = build({ trigger: 'chat', input: intent.payload, state });
 
     const result = await ask(ctx);
 
