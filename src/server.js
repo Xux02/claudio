@@ -4,6 +4,9 @@ import { init as initDb, logMessage, logPlay, getRecentPlays, getHistory, close 
 import { route, handleDirect } from './router.js';
 import { build } from './context.js';
 import { ask } from './claude.js';
+import { search as musicSearch, getSongUrl } from './music.js';
+import { synthesize } from './tts.js';
+import { start as startScheduler, stop as stopScheduler, getSchedule } from './scheduler.js';
 
 const app = express();
 app.use(express.json());
@@ -49,10 +52,29 @@ app.post('/api/chat', async (req, res) => {
     }
 
     if (intent.type === 'music') {
+      const keyword = intent.payload
+        .replace(/^(播放|来首|想听|放一首|换首歌|切歌|下一首|推荐首歌)/, '')
+        .trim();
+      const songs = await musicSearch(keyword || intent.payload, 5);
+
+      for (const song of songs) {
+        const url = await getSongUrl(song.id);
+        song.url = url || undefined;
+      }
+
+      logMessage({ role: 'user', content: message });
+      const say = songs.length > 0
+        ? `为你找到 ${songs.length} 首歌，希望你喜欢~`
+        : '抱歉，没有搜到相关歌曲，换个关键词试试？';
+      logMessage({ role: 'assistant', content: say });
+      for (const song of songs) {
+        logPlay({ song_id: song.id, title: song.title, artist: song.artist || '' });
+      }
+
       return res.json({
-        say: '音乐搜索功能正在接入中，很快就能用了！你可以先跟我聊聊天，我会根据你的品味推荐歌曲~',
-        play: [],
-        reason: '',
+        say,
+        play: songs,
+        reason: songs.length > 0 ? `搜索"${keyword || intent.payload}"的结果` : '',
         segue: '',
       });
     }
@@ -134,17 +156,128 @@ app.get('/api/history', (req, res) => {
   }
 });
 
+// POST /api/trigger — manual scheduler trigger
+app.post('/api/trigger', async (req, res) => {
+  try {
+    const { reason } = req.body;
+    if (!reason || typeof reason !== 'string') {
+      return res.status(400).json({ error: 'reason is required' });
+    }
+
+    const state = { getRecentPlays };
+    const ctx = build({ trigger: `手动触发: ${reason}`, input: '', state });
+
+    const result = await ask(ctx);
+
+    // Search real song URLs
+    const playWithUrls = [];
+    for (const song of result.play) {
+      const searchResults = await musicSearch(`${song.title} ${song.artist || ''}`, 1);
+      if (searchResults.length > 0) {
+        const url = await getSongUrl(searchResults[0].id);
+        playWithUrls.push({
+          title: searchResults[0].title,
+          artist: searchResults[0].artist,
+          url: url || undefined,
+          reason: song.reason,
+        });
+      } else {
+        playWithUrls.push({ title: song.title, artist: song.artist || '', reason: song.reason });
+      }
+    }
+
+    // Generate TTS
+    const ttsPath = await synthesize(result.say);
+
+    // Persist
+    logMessage({
+      role: 'assistant',
+      content: result.say,
+      meta: { songs: playWithUrls, reason: result.reason, segue: result.segue },
+    });
+    for (const song of playWithUrls) {
+      logPlay({ song_id: song.id || null, title: song.title, artist: song.artist || '' });
+    }
+
+    return res.json({
+      say: result.say,
+      play: playWithUrls,
+      reason: result.reason,
+      segue: result.segue,
+      tts: ttsPath,
+    });
+  } catch (err) {
+    console.error('/api/trigger error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/schedule — view today's trigger status
+app.get('/api/schedule', (req, res) => {
+  try {
+    const schedule = getSchedule();
+    res.json({ schedule });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`Claudio is listening on http://localhost:${PORT}`);
 });
 
+// Start scheduler
+startScheduler(async (reason) => {
+  console.log(`[scheduler] Triggered: ${reason}`);
+  try {
+    const state = { getRecentPlays };
+    const ctx = build({ trigger: reason, input: '', state });
+    const result = await ask(ctx);
+
+    const playWithUrls = [];
+    for (const song of result.play) {
+      const searchResults = await musicSearch(`${song.title} ${song.artist || ''}`, 1);
+      if (searchResults.length > 0) {
+        const url = await getSongUrl(searchResults[0].id);
+        playWithUrls.push({
+          title: searchResults[0].title,
+          artist: searchResults[0].artist,
+          url: url || undefined,
+          reason: song.reason,
+        });
+      } else {
+        playWithUrls.push({ title: song.title, artist: song.artist || '', reason: song.reason });
+      }
+    }
+
+    const ttsPath = await synthesize(result.say);
+
+    logMessage({
+      role: 'assistant',
+      content: result.say,
+      meta: { songs: playWithUrls, reason: result.reason, segue: result.segue },
+    });
+    for (const song of playWithUrls) {
+      logPlay({ song_id: song.id || null, title: song.title, artist: song.artist || '' });
+    }
+
+    console.log(`[scheduler] DJ says: ${result.say.slice(0, 50)}...`);
+    console.log(`[scheduler] TTS: ${ttsPath || 'none'}`);
+    console.log(`[scheduler] Songs: ${playWithUrls.map(s => s.title).join(', ')}`);
+  } catch (err) {
+    console.error('[scheduler] Error:', err.message);
+  }
+});
+
 // Graceful shutdown
 process.on('SIGINT', () => {
+  stopScheduler();
   closeDb();
   process.exit(0);
 });
 process.on('SIGTERM', () => {
+  stopScheduler();
   closeDb();
   process.exit(0);
 });
