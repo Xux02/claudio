@@ -1,4 +1,4 @@
-import { chat, getHistory } from './api.js';
+import { chatWithRetry, getHistory } from './api.js';
 import { initVisualizer, update, setProgress, setPlaying, isPlaying } from './player.js';
 import { render, clearInput, showToast, saveAvatar } from './chat.js';
 
@@ -31,7 +31,7 @@ async function sendMessage() {
   clearInput();
 
   try {
-    const result = await chat(text);
+    const result = await chatWithRetry(text);
     render({ type: 'ai', sender: 'Claudio', text: result.say, time: new Date() });
 
     if (result.play && result.play.length > 0) {
@@ -45,7 +45,7 @@ async function sendMessage() {
       setPlaying(true);
     }
   } catch (err) {
-    showToast('网络异常，请稍后');
+    showToast('Claudio 走神了，重试一下？');
     console.error('Chat error:', err);
   }
 }

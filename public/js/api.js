@@ -25,3 +25,18 @@ export async function getTaste() {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
+
+export async function chatWithRetry(text, maxRetries = 3) {
+  let lastErr;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await chat(text);
+    } catch (err) {
+      lastErr = err;
+      if (i < maxRetries - 1) {
+        await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+      }
+    }
+  }
+  throw lastErr;
+}
