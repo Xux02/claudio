@@ -1,0 +1,90 @@
+const AVATAR_DEFAULTS = { ai: '🤖', user: '😊' };
+
+export function formatMsgTime(date) {
+  const h = String(date.getHours()).padStart(2, '0');
+  const m = String(date.getMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+function createMsgElement(msg) {
+  const div = document.createElement('div');
+  div.className = `msg ${msg.type}`;
+
+  const avatar = document.createElement('div');
+  avatar.className = `avatar ${msg.type}`;
+  avatar.title = msg.type === 'ai' ? '点击查看 AI 资料' : '点击更换头像';
+  const saved = loadAvatar(msg.type);
+  if (saved) {
+    avatar.style.backgroundImage = `url(${saved})`;
+    avatar.style.backgroundSize = 'cover';
+    avatar.textContent = '';
+  } else {
+    avatar.textContent = AVATAR_DEFAULTS[msg.type];
+  }
+  avatar.addEventListener('click', () => {
+    if (msg.type === 'ai') {
+      document.dispatchEvent(new CustomEvent('claudio:showProfile'));
+    } else {
+      document.dispatchEvent(new CustomEvent('claudio:changeAvatar', { detail: { type: 'user' } }));
+    }
+  });
+
+  const body = document.createElement('div');
+  body.className = 'msg-body';
+
+  const meta = document.createElement('div');
+  meta.className = 'msg-meta';
+  meta.textContent = msg.sender;
+
+  const bubble = document.createElement('div');
+  bubble.className = `bubble ${msg.type}`;
+  bubble.textContent = msg.text;
+
+  const time = document.createElement('div');
+  time.className = 'msg-time';
+  time.textContent = formatMsgTime(msg.time);
+
+  body.appendChild(meta);
+  body.appendChild(bubble);
+  body.appendChild(time);
+  div.appendChild(avatar);
+  div.appendChild(body);
+  return div;
+}
+
+export function render(msg) {
+  const area = document.getElementById('chat-area');
+  const el = createMsgElement(msg);
+  area.appendChild(el);
+  scrollBottom();
+}
+
+export function scrollBottom() {
+  const area = document.getElementById('chat-area');
+  area.scrollTop = area.scrollHeight;
+}
+
+export function saveAvatar(type, base64) {
+  if (base64 && base64.length > 5 * 1024 * 1024) {
+    showToast('图片太大，请选择小于 5MB 的图片');
+    return false;
+  }
+  localStorage.setItem(`claudio_avatar_${type}`, base64 || '');
+  return true;
+}
+
+export function loadAvatar(type) {
+  return localStorage.getItem(`claudio_avatar_${type}`) || null;
+}
+
+export function showToast(text, duration = 3000) {
+  const toast = document.getElementById('toast');
+  toast.textContent = text;
+  toast.classList.remove('hidden');
+  setTimeout(() => toast.classList.add('hidden'), duration);
+}
+
+export function clearInput() {
+  const input = document.getElementById('chat-input');
+  input.value = '';
+}
