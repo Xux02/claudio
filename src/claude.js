@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
-const DEFAULT_TIMEOUT = 30_000;
-const MAX_RETRIES = 2;
+const DEFAULT_TIMEOUT = 60_000;
+const MAX_RETRIES = 1;
 
 /**
  * Normalize a stream-of-objects or single-object Claude JSON response into a
@@ -19,7 +19,6 @@ function parseClaudeOutput(raw) {
     try {
       last = JSON.parse(line);
     } catch {
-      // Claude may wrap output with markdown fences; try to extract
       const match = line.match(/\{[\s\S]*\}/);
       if (match) {
         try {
@@ -46,6 +45,20 @@ function parseClaudeOutput(raw) {
     throw new Error(
       `Claude response was not valid JSON. Raw output:\n${raw.slice(0, 500)}`
     );
+  }
+
+  // Claude CLI wraps responses in an envelope: {"type":"result","result":"{...}"}
+  if (last.is_error) {
+    throw new Error(`Claude API error: ${last.result || 'unknown'}`);
+  }
+  if (last.result && typeof last.result === 'string') {
+    // Strip markdown code fences if present
+    const inner = last.result.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+    try {
+      return JSON.parse(inner);
+    } catch {
+      return { say: inner };
+    }
   }
 
   return last;

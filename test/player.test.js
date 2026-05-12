@@ -28,7 +28,6 @@ describe('player module', () => {
         <div id="progress-fill"></div>
         <div id="time-current"></div>
         <div id="time-total"></div>
-        <div id="time-display"></div>
       `;
       const { update } = await import('../public/js/player.js');
 
@@ -45,7 +44,6 @@ describe('player module', () => {
         <div id="progress-fill"></div>
         <div id="time-current"></div>
         <div id="time-total"></div>
-        <div id="time-display"></div>
       `;
       const { update } = await import('../public/js/player.js');
 
@@ -61,7 +59,6 @@ describe('player module', () => {
         <div id="progress-fill"></div>
         <div id="time-current">0:00</div>
         <div id="time-total">0:00</div>
-        <div id="time-display">0:00</div>
       `;
       const { setProgress } = await import('../public/js/player.js');
 
@@ -70,7 +67,6 @@ describe('player module', () => {
       expect(document.getElementById('progress-fill').style.width).toBe('49%');
       expect(document.getElementById('time-current').textContent).toBe('2:05');
       expect(document.getElementById('time-total').textContent).toBe('4:17');
-      expect(document.getElementById('time-display').textContent).toBe('2:05');
     });
 
     it('clamps progress to 100%', async () => {
@@ -78,7 +74,6 @@ describe('player module', () => {
         <div id="progress-fill"></div>
         <div id="time-current"></div>
         <div id="time-total"></div>
-        <div id="time-display"></div>
       `;
       const { setProgress } = await import('../public/js/player.js');
 
@@ -92,7 +87,6 @@ describe('player module', () => {
         <div id="progress-fill"></div>
         <div id="time-current"></div>
         <div id="time-total"></div>
-        <div id="time-display"></div>
       `;
       const { setProgress } = await import('../public/js/player.js');
 
@@ -120,6 +114,7 @@ describe('player module', () => {
   describe('setPlaying', () => {
     it('toggles play button text and visualizer class', async () => {
       document.body.innerHTML = `
+        <audio id="audio-player"></audio>
         <button id="btn-play">▶</button>
         <div id="visualizer"></div>
       `;

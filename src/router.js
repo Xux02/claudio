@@ -1,4 +1,4 @@
-const DIRECT_KEYWORDS = ['天气', '时间', '几点了', '帮助', 'help', '你好', '早', '晚安'];
+const DIRECT_KEYWORDS = ['天气', '时间', '几点了', '帮助', 'help'];
 const MUSIC_KEYWORDS = ['播放', '来首', '想听', '放一首', '换首歌', '切歌', '下一首', '推荐首歌'];
 
 /**
@@ -10,18 +10,17 @@ export function route(message) {
   const trimmed = (message || '').trim();
 
   if (!trimmed) {
-    return { type: 'direct', payload: '你好，我是 Claudio，想听点什么吗？' };
+    return { type: 'claude', payload: '' };
   }
 
-  // Check music intent first (before direct) to avoid substring
-  // collisions, e.g. '早' in '来首早安歌' or '晚安' in '播放晚安曲'
+  // Check music intent first to avoid substring collisions
   for (const kw of MUSIC_KEYWORDS) {
     if (trimmed.includes(kw)) {
       return { type: 'music', payload: trimmed };
     }
   }
 
-  // Check direct keywords
+  // Only pure utility queries go direct — everything else goes to Claude
   for (const kw of DIRECT_KEYWORDS) {
     if (trimmed.includes(kw)) {
       return { type: 'direct', payload: trimmed };
@@ -33,9 +32,7 @@ export function route(message) {
 }
 
 /**
- * Handle direct commands without LLM.
- * @param {string} message
- * @returns {string}
+ * Handle direct utility commands without LLM.
  */
 export function handleDirect(message) {
   if (message.includes('天气')) {
@@ -58,12 +55,5 @@ export function handleDirect(message) {
   if (message.includes('帮助') || message.includes('help')) {
     return '我是 Claudio，你的个人 AI 电台 DJ 🎵\n\n你可以这样和我对话：\n• 直接聊天：「今天心情不错」「好累啊」\n• 点歌：「来首周杰伦」「想听民谣」\n• 控制播放：「换首歌」「下一首」（即将支持）\n\n直接打字跟我聊天吧~';
   }
-  if (message.includes('你好') || message.includes('早') || message.includes('晚安')) {
-    const hour = new Date().getHours();
-    if (hour < 6) return '夜深了，还没睡吗？来首安静的歌陪你入眠吧。';
-    if (hour < 9) return '早上好！今天的阳光很适合来点轻快的音乐~';
-    if (hour < 18) return '嗨，有什么想听的吗？';
-    return '晚上好~今天过得怎么样？想听点什么放松一下？';
-  }
-  return '嗯，我在听。';
+  return '';
 }

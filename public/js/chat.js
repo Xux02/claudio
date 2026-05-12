@@ -57,11 +57,14 @@ export function render(msg) {
   const el = createMsgElement(msg);
   area.appendChild(el);
   scrollBottom();
+  return el;
 }
 
 export function scrollBottom() {
   const area = document.getElementById('chat-area');
-  area.scrollTop = area.scrollHeight;
+  requestAnimationFrame(() => {
+    area.scrollTop = area.scrollHeight;
+  });
 }
 
 export function saveAvatar(type, base64) {

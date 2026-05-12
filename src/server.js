@@ -1,14 +1,21 @@
 import 'dotenv/config';
 import express from 'express';
-import { init as initDb, logMessage, logPlay, getRecentPlays, getHistory, close as closeDb } from './state.js';
+import { init as initDb, logMessage, deleteMessage, logPlay, getRecentPlays, getHistory, close as closeDb } from './state.js';
 import { route, handleDirect } from './router.js';
 import { build } from './context.js';
-import { ask } from './claude.js';
 import { search as musicSearch, getSongUrl } from './music.js';
 import { synthesize } from './tts.js';
 import { start as startScheduler, stop as stopScheduler, getSchedule } from './scheduler.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// Pick AI provider: "deepseek" or "claude" (default)
+const AI_PROVIDER = process.env.AI_PROVIDER || 'claude';
+const aiModule = AI_PROVIDER === 'deepseek'
+  ? await import('./deepseek.js')
+  : await import('./claude.js');
+const { ask } = aiModule;
+console.log(`[server] AI provider: ${AI_PROVIDER}`);
 
 const app = express();
 app.use(express.json());
@@ -78,9 +85,9 @@ app.post('/api/chat', async (req, res) => {
 
     if (intent.type === 'direct') {
       const say = handleDirect(intent.payload);
-      logMessage({ role: 'user', content: message });
-      logMessage({ role: 'assistant', content: say });
-      return res.json({ say, play: [], reason: '', segue: '' });
+      const userMsgId = logMessage({ role: 'user', content: message });
+      const aiMsgId = logMessage({ role: 'assistant', content: say });
+      return res.json({ say, play: [], reason: '', segue: '', userMessageId: userMsgId, messageId: aiMsgId });
     }
 
     if (intent.type === 'music') {
@@ -93,11 +100,11 @@ app.post('/api/chat', async (req, res) => {
         song.url = await getSongUrl(song.id) || undefined;
       }));
 
-      logMessage({ role: 'user', content: message });
+      const userMsgId = logMessage({ role: 'user', content: message });
       const say = songs.length > 0
         ? `为你找到 ${songs.length} 首歌，希望你喜欢~`
         : '抱歉，没有搜到相关歌曲，换个关键词试试？';
-      logMessage({ role: 'assistant', content: say });
+      const aiMsgId = logMessage({ role: 'assistant', content: say });
       for (const song of songs) {
         logPlay({ song_id: song.id, title: song.title, artist: song.artist || '' });
       }
@@ -107,6 +114,8 @@ app.post('/api/chat', async (req, res) => {
         play: songs,
         reason: songs.length > 0 ? `搜索"${keyword || intent.payload}"的结果` : '',
         segue: '',
+        userMessageId: userMsgId,
+        messageId: aiMsgId,
       });
     }
 
@@ -116,22 +125,27 @@ app.post('/api/chat', async (req, res) => {
 
     const result = await ask(ctx);
 
+    // Resolve song URLs so the frontend can actually play them
+    const playWithUrls = await resolvePlaylist(result.play);
+
     // Persist
-    logMessage({ role: 'user', content: message });
-    logMessage({
+    const userMsgId = logMessage({ role: 'user', content: message });
+    const aiMsgId = logMessage({
       role: 'assistant',
       content: result.say,
-      meta: { songs: result.play, reason: result.reason, segue: result.segue },
+      meta: { songs: playWithUrls, reason: result.reason, segue: result.segue },
     });
-    for (const song of result.play) {
+    for (const song of playWithUrls) {
       logPlay({ title: song.title, artist: song.artist || '' });
     }
 
     return res.json({
-      say: result.say,
-      play: result.play,
+      say: result.say || '嗯，我在听。想听点什么歌吗？',
+      play: playWithUrls,
       reason: result.reason,
       segue: result.segue,
+      userMessageId: userMsgId,
+      messageId: aiMsgId,
     });
   } catch (err) {
     console.error('/api/chat error:', err);
@@ -182,6 +196,17 @@ app.get('/api/history', (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 20, 100);
     const messages = getHistory(limit);
     res.json({ messages });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/messages/:id — remove a single message
+app.delete('/api/messages/:id', (req, res) => {
+  try {
+    const result = deleteMessage(req.params.id);
+    if (result.changes === 0) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

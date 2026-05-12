@@ -26,6 +26,11 @@ export async function getTaste() {
   return res.json();
 }
 
+export async function deleteMsg(id) {
+  const res = await fetch(`/api/messages/${id}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
 export async function chatWithRetry(text, maxRetries = 3) {
   let lastErr;
   for (let i = 0; i < maxRetries; i++) {

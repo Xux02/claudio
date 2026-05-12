@@ -68,6 +68,7 @@ describe('chat module', () => {
     });
 
     it('auto-scrolls to bottom after render', async () => {
+      vi.stubGlobal('requestAnimationFrame', fn => fn());
       createChatDOM();
       const { render } = await import('../public/js/chat.js');
       const area = document.getElementById('chat-area');

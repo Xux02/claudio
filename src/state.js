@@ -47,6 +47,10 @@ export function logMessage({ role, content, meta = null }) {
   return id;
 }
 
+export function deleteMessage(id) {
+  return db.prepare('DELETE FROM messages WHERE id = ?').run(id);
+}
+
 export function logPlay({ song_id = null, title, artist = '' }) {
   const id = randomUUID();
   db.prepare(
@@ -81,8 +85,9 @@ export function setPref(key, value) {
 
 export function getHistory(limit = 20) {
   return db
-    .prepare('SELECT * FROM messages ORDER BY created_at DESC LIMIT ?')
-    .all(limit);
+    .prepare('SELECT * FROM messages ORDER BY created_at DESC, rowid DESC LIMIT ?')
+    .all(limit)
+    .reverse();
 }
 
 export function close() {
