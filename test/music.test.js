@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { search, getSongUrl, getLyric } from '../src/music.js';
+import { search, getSongUrl, getLyric, loginByQR, checkLoginStatus } from '../src/music.js';
 
 describe('music.search', () => {
   it('returns parsed song array on success', async () => {
@@ -103,5 +103,79 @@ describe('music.getLyric', () => {
 
     const lyric = await getLyric('123');
     expect(lyric).toBe('');
+  });
+});
+
+describe('music.loginByQR', () => {
+  it('returns qrUrl and unikey on success', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        json: () => Promise.resolve({
+          code: 200,
+          data: { unikey: 'abc123' },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: () => Promise.resolve({
+          code: 200,
+          data: { qrurl: 'https://music.163.com/login/qr?key=abc123', unikey: 'abc123' },
+        }),
+      });
+
+    const result = await loginByQR();
+    expect(result).toEqual({
+      qrUrl: 'https://music.163.com/login/qr?key=abc123',
+      unikey: 'abc123',
+    });
+  });
+
+  it('returns null when key generation fails', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      json: () => Promise.resolve({ code: 500 }),
+    });
+
+    const result = await loginByQR();
+    expect(result).toBeNull();
+  });
+
+  it('returns null on network error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('ECONNREFUSED'));
+
+    const result = await loginByQR();
+    expect(result).toBeNull();
+  });
+});
+
+describe('music.checkLoginStatus', () => {
+  it('returns loggedIn=true with profile when logged in', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      json: () => Promise.resolve({
+        code: 200,
+        data: { code: 803 },
+        profile: { userId: 12345, nickname: 'Xux02' },
+      }),
+    });
+
+    const result = await checkLoginStatus();
+    expect(result).toEqual({ loggedIn: true, profile: { userId: 12345, nickname: 'Xux02' } });
+  });
+
+  it('returns loggedIn=false when not logged in (code 801)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      json: () => Promise.resolve({
+        code: 200,
+        data: { code: 801 },
+      }),
+    });
+
+    const result = await checkLoginStatus();
+    expect(result).toEqual({ loggedIn: false, profile: null });
+  });
+
+  it('returns loggedIn=false on network error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('fail'));
+
+    const result = await checkLoginStatus();
+    expect(result).toEqual({ loggedIn: false, profile: null });
   });
 });

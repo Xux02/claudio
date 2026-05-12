@@ -49,3 +49,36 @@ export async function getLyric(id) {
     return '';
   }
 }
+
+export async function loginByQR() {
+  try {
+    const keyRes = await fetch(`${BASE}/login/qr/key`);
+    const keyData = await keyRes.json();
+    if (keyData.code !== 200 || !keyData.data?.unikey) return null;
+    const unikey = keyData.data.unikey;
+
+    const qrRes = await fetch(`${BASE}/login/qr/create?key=${unikey}`);
+    const qrData = await qrRes.json();
+    if (qrData.code !== 200 || !qrData.data?.qrurl) return null;
+
+    return { qrUrl: qrData.data.qrurl, unikey };
+  } catch (err) {
+    console.error('music.loginByQR error:', err.message);
+    return null;
+  }
+}
+
+export async function checkLoginStatus() {
+  try {
+    const res = await fetch(`${BASE}/login/status`);
+    const data = await res.json();
+    if (data.code !== 200) return { loggedIn: false, profile: null };
+    if (data.data?.code === 803) {
+      return { loggedIn: true, profile: data.profile || null };
+    }
+    return { loggedIn: false, profile: null };
+  } catch (err) {
+    console.error('music.checkLoginStatus error:', err.message);
+    return { loggedIn: false, profile: null };
+  }
+}
