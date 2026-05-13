@@ -92,6 +92,73 @@ export function clearInput() {
   input.value = '';
 }
 
+export function renderFeedbackButtons(songs, parentEl) {
+  if (!songs || songs.length === 0) return;
+
+  const container = document.createElement('div');
+  container.className = 'feedback-btns';
+
+  songs.forEach((song, i) => {
+    const row = document.createElement('div');
+    row.className = 'feedback-row';
+    row.innerHTML = `
+      <span class="feedback-song">${escHtml(song.title)}${song.artist ? ' · ' + escHtml(song.artist) : ''}</span>
+      <span class="feedback-actions">
+        <button class="fb-btn like" data-idx="${i}" title="喜欢">👍</button>
+        <button class="fb-btn dislike" data-idx="${i}" title="不喜欢">👎</button>
+      </span>
+    `;
+    container.appendChild(row);
+  });
+
+  parentEl.appendChild(container);
+  return container;
+}
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+export function renderThinkingBubble() {
+  const area = document.getElementById('chat-area');
+  const el = document.createElement('div');
+  el.className = 'msg ai thinking-msg';
+  el.id = 'thinking-bubble';
+
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar ai';
+  const saved = loadAvatar('ai');
+  if (saved) {
+    avatar.style.backgroundImage = `url(${saved})`;
+    avatar.style.backgroundSize = 'cover';
+  } else {
+    avatar.textContent = '🤖';
+  }
+
+  const body = document.createElement('div');
+  body.className = 'msg-body';
+  body.innerHTML = `
+    <div class="msg-meta">Claudio</div>
+    <div class="bubble ai thinking-bubble">
+      <span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span>
+      正在思考
+    </div>
+  `;
+
+  el.appendChild(avatar);
+  el.appendChild(body);
+  area.appendChild(el);
+  scrollBottom();
+  return el;
+}
+
+export function removeThinkingBubble() {
+  const el = document.getElementById('thinking-bubble');
+  if (el) el.remove();
+}
+
 export function renderSystemMsg(text) {
   const area = document.getElementById('chat-area');
   const el = document.createElement('div');

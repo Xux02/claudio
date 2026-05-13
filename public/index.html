@@ -44,8 +44,12 @@
         <button id="btn-play" class="ctrl-btn play" title="播放/暂停">▶</button>
         <button id="btn-next" class="ctrl-btn" title="下一首">⏭</button>
         <button id="btn-playlist" class="ctrl-btn" title="播放列表">☰</button>
-        <span class="vol-icon">🔊</span>
-        <input id="vol-slider" type="range" class="vol-slider" min="0" max="100" value="65">
+        <span class="vol-icon" id="vol-icon">VOL</span>
+        <div class="vol-slider" id="vol-slider" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="65" tabindex="0">
+          <div class="vol-track">
+            <div class="vol-track-fill"></div>
+          </div>
+        </div>
       </div>
       <div id="progress-track" class="progress-track">
         <span id="time-current" class="time-chip">0:00</span>
@@ -67,16 +71,27 @@
       </div>
     </div>
 
-    <!-- thinking indicator -->
-    <div id="thinking" class="thinking hidden">
-      <span class="thinking-dot"></span>
-      Claudio 正在思考...
+    <!-- favorites panel (overlay) -->
+    <div id="favorites-panel" class="favorites-panel hidden">
+      <div class="favorites-panel-mask"></div>
+      <div class="favorites-panel-card">
+        <div class="favorites-panel-header">
+          <span class="favorites-panel-title">❤️ 我的收藏</span>
+          <button id="favorites-close" class="favorites-close-btn">✕</button>
+        </div>
+        <div id="favorites-list" class="favorites-list">
+          <div class="favorites-loading">加载中...</div>
+        </div>
+      </div>
     </div>
 
     <!-- chat header -->
     <div id="chat-header" class="chat-header">
       <span class="chat-header-name">Claudio</span>
       <div class="chat-header-actions">
+        <button id="btn-import" class="history-btn" title="导入歌单">📥</button>
+        <button id="btn-favorites" class="history-btn" title="收藏">❤️</button>
+        <button id="btn-clear" class="history-btn" title="清除记忆和品味数据">🧹</button>
         <button id="btn-new-chat" class="history-btn" title="新对话">+</button>
         <button id="btn-history" class="history-btn" title="历史对话">历史</button>
         <span class="online-dot-static"></span>
@@ -101,6 +116,21 @@
 
     <!-- toast -->
     <div id="toast" class="toast hidden"></div>
+
+    <!-- import dialog -->
+    <div id="import-dialog" class="import-dialog hidden">
+      <div class="import-dialog-mask"></div>
+      <div class="import-dialog-card">
+        <div class="import-dialog-title">导入网易云歌单</div>
+        <div class="import-dialog-desc">粘贴歌单链接，让 Claudio 更懂你的品味</div>
+        <input id="import-url" type="text" class="import-url-input" placeholder="https://music.163.com/playlist?id=..." autocomplete="off">
+        <div id="import-error" class="import-error hidden"></div>
+        <div class="import-dialog-btns">
+          <button id="import-cancel" class="import-btn cancel">取消</button>
+          <button id="import-submit" class="import-btn submit">导入</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="/js/app.js"></script>

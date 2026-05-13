@@ -26,6 +26,12 @@ export async function getTaste() {
   return res.json();
 }
 
+export async function getProfile() {
+  const res = await fetch('/api/profile');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function deleteMsg(id) {
   const res = await fetch(`/api/messages/${id}`, { method: 'DELETE' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -52,6 +58,63 @@ export async function triggerGreeting() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ reason: '用户刚进来，打个招呼' }),
   });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function sendFeedback(title, artist, rating) {
+  const res = await fetch('/api/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, artist, rating }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function importPlaylist(url) {
+  const res = await fetch('/api/import-playlist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function getWeather() {
+  const res = await fetch('/api/weather');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function addFavorite(title, artist, source = '') {
+  const res = await fetch('/api/favorites', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, artist, source }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function getFavorites(limit = 100) {
+  const res = await fetch(`/api/favorites?limit=${limit}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function removeFavorite(id) {
+  const res = await fetch(`/api/favorites/${id}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function clearMemory() {
+  const res = await fetch('/api/clear', { method: 'POST' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }

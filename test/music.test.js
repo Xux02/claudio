@@ -3,16 +3,21 @@ import { search, getSongUrl, getLyric, loginByQR, checkLoginStatus } from '../sr
 
 describe('music.search', () => {
   it('returns parsed song array on success', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
-      json: () => Promise.resolve({
-        code: 200,
-        result: {
-          songs: [
-            { id: 123, name: '晴天', artists: [{ name: '周杰伦' }], album: { name: '叶惠美' }, duration: 269000 },
-          ],
-        },
-      }),
-    });
+    // QQ is tried first — mock empty result so it falls through to NetEase
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        json: () => Promise.resolve({ code: 1, data: { song: { list: [] } } }),
+      })
+      .mockResolvedValueOnce({
+        json: () => Promise.resolve({
+          code: 200,
+          result: {
+            songs: [
+              { id: 123, name: '晴天', artists: [{ name: '周杰伦' }], album: { name: '叶惠美' }, duration: 269000 },
+            ],
+          },
+        }),
+      });
 
     const result = await search('晴天', 3);
     expect(result).toHaveLength(1);
@@ -29,16 +34,18 @@ describe('music.search', () => {
   });
 
   it('returns empty array when API returns non-200', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
-      json: () => Promise.resolve({ code: 500 }),
-    });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      Promise.resolve({ json: () => Promise.resolve({ code: 500 }) })
+    );
 
     const result = await search('xxx');
     expect(result).toEqual([]);
   });
 
   it('returns empty array on fetch error (API down)', async () => {
-    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      Promise.reject(new Error('ECONNREFUSED'))
+    );
 
     const result = await search('xxx');
     expect(result).toEqual([]);

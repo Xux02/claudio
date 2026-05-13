@@ -1,12 +1,21 @@
-import { chatWithRetry, getHistory, deleteMsg, triggerGreeting } from './api.js';
-import { initVisualizer, addToQueue, setPlaying, togglePlay, playPrevSong, playNextSong, setVolume, startClock, togglePlaylist } from './player.js';
-import { render, clearInput, scrollBottom, showToast, saveAvatar, renderSystemMsg, initElasticScroll } from './chat.js';
+import { chatWithRetry, getHistory, deleteMsg, triggerGreeting, sendFeedback, importPlaylist, getWeather, addFavorite, getFavorites, removeFavorite, clearMemory } from './api.js';
+import { initVisualizer, addToQueue, setPlaying, togglePlay, playPrevSong, playNextSong, initVolumeSlider, startClock, togglePlaylist, getCurrentSong } from './player.js';
+import { render, clearInput, scrollBottom, showToast, saveAvatar, renderSystemMsg, renderFeedbackButtons, renderThinkingBubble, removeThinkingBubble, initElasticScroll } from './chat.js';
 import { getCurrentMessages, saveCurrentMessages, archiveAndClear, getSavedSessions, loadSession, showSessionBar, showSessionPicker } from './sessions.js';
 
 // ─── Weather / location ──────────────────────────────────────
 
-document.getElementById('weather-icon').textContent = '☀️';
-document.getElementById('weather-text').textContent = '扬州 · 18°C';
+async function initWeather() {
+  try {
+    const w = await getWeather();
+    document.getElementById('weather-icon').textContent = w.icon || '🌤️';
+    document.getElementById('weather-text').textContent = `${w.city} · ${w.temp !== null ? w.temp + '°C' : '--'}  ${w.desc}`;
+  } catch {
+    document.getElementById('weather-icon').textContent = '🌤️';
+    document.getElementById('weather-text').textContent = '扬州 · --';
+  }
+}
+initWeather();
 
 const now = new Date();
 const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -17,6 +26,7 @@ document.getElementById('today-date').textContent = dateStr;
 initVisualizer();
 startClock();
 setPlaying(false);
+initVolumeSlider();
 
 // Now playing notification in chat
 document.addEventListener('claudio:nowPlaying', (e) => {
@@ -32,17 +42,6 @@ document.getElementById('btn-prev').addEventListener('click', playPrevSong);
 document.getElementById('btn-next').addEventListener('click', playNextSong);
 document.getElementById('btn-playlist').addEventListener('click', togglePlaylist);
 
-document.getElementById('vol-slider').addEventListener('input', (e) => {
-  setVolume(parseInt(e.target.value));
-});
-
-// ─── Thinking indicator ──────────────────────────────────────
-
-const thinkingEl = document.getElementById('thinking');
-
-function showThinking() { thinkingEl.classList.remove('hidden'); scrollBottom(); }
-function hideThinking() { thinkingEl.classList.add('hidden'); }
-
 // ─── Send message ────────────────────────────────────────────
 
 // Track the last user-message DOM element so we can attach DB id later
@@ -56,11 +55,11 @@ async function sendMessage() {
 
   lastUserEl = render({ type: 'user', sender: '我', text, time: new Date() });
   clearInput();
-  showThinking();
+  const thinkingEl = renderThinkingBubble();
 
   try {
     const result = await chatWithRetry(text);
-    hideThinking();
+    removeThinkingBubble();
     const say = result.say || '嗯...信号不太好，你刚说什么？';
     lastAiEl = render({ type: 'ai', sender: 'Claudio', text: say, time: new Date() });
 
@@ -72,14 +71,18 @@ async function sendMessage() {
       lastAiEl.dataset.msgId = result.messageId;
     }
 
-    if (result.play && result.play.length > 0) {
-      addToQueue([result.play[0]]);
+    // Store song list on the AI message element — user chooses whether to play
+    const playableSongs = (result.play || []).filter(s => s.url);
+    if (playableSongs.length > 0) {
+      lastAiEl._songs = playableSongs;
+      const fbContainer = renderFeedbackButtons(playableSongs, lastAiEl.querySelector('.msg-body'));
+      wireSongFeedback(fbContainer, playableSongs);
     }
 
     // Persist to localStorage after each exchange
     persistCurrent();
   } catch (err) {
-    hideThinking();
+    removeThinkingBubble();
     // Server unreachable — show fallback locally
     const el = render({ type: 'ai', sender: 'Claudio', text: '啧，刚走神了，你再说一遍？', time: new Date() });
     if (lastUserEl) lastUserEl.dataset.msgId = '';
@@ -216,17 +219,21 @@ async function startNewChat() {
   archiveAndClear();
   clearChatArea();
 
-  showThinking();
+  const thinkingEl = renderThinkingBubble();
   try {
     const result = await triggerGreeting();
-    hideThinking();
+    removeThinkingBubble();
     const say = result.say || '哟，Claudio 在这儿呢。今天想听点什么？';
-    render({ type: 'ai', sender: 'Claudio', text: say, time: new Date() });
-    if (result.play && result.play.length > 0) {
-      addToQueue([result.play[0]]);
+    const aiEl = render({ type: 'ai', sender: 'Claudio', text: say, time: new Date() });
+    // Show playable songs with play button but don't auto-add
+    const playable = (result.play || []).filter(s => s.url);
+    if (playable.length > 0) {
+      aiEl._songs = playable;
+      const fbContainer = renderFeedbackButtons(playable, aiEl.querySelector('.msg-body'));
+      wireSongFeedback(fbContainer, playable);
     }
   } catch {
-    hideThinking();
+    removeThinkingBubble();
     render({
       type: 'ai',
       sender: 'Claudio',
@@ -235,6 +242,71 @@ async function startNewChat() {
     });
   }
 }
+
+// ─── "清除记忆" button ──────────────────────────────────────────
+
+document.getElementById('btn-clear').addEventListener('click', async () => {
+  if (!confirm('确定要清除 Claudio 的所有记忆和品味偏好吗？\n\n这将删除所有对话记录、播放记录、反馈和偏好设置。清除后你可以重新导入歌单。')) return;
+  try {
+    await clearMemory();
+    clearChatArea();
+    // Clear localStorage sessions too
+    const { archiveAndClear } = await import('./sessions.js');
+    archiveAndClear();
+    showToast('记忆已清除，重新开始吧 🧹');
+    // Re-trigger greeting
+    setTimeout(() => startNewChat(), 500);
+  } catch (err) {
+    showToast('清除失败: ' + err.message);
+  }
+});
+
+// ─── "导入歌单" dialog ──────────────────────────────────────────
+
+document.getElementById('btn-import').addEventListener('click', () => {
+  const dialog = document.getElementById('import-dialog');
+  dialog.classList.remove('hidden');
+  document.getElementById('import-url').value = '';
+  document.getElementById('import-error').classList.add('hidden');
+  document.getElementById('import-submit').disabled = false;
+});
+
+document.getElementById('import-cancel').addEventListener('click', () => {
+  document.getElementById('import-dialog').classList.add('hidden');
+});
+
+document.getElementById('import-dialog').querySelector('.import-dialog-mask')
+  .addEventListener('click', () => {
+    document.getElementById('import-dialog').classList.add('hidden');
+  });
+
+document.getElementById('import-submit').addEventListener('click', async () => {
+  const urlInput = document.getElementById('import-url');
+  const errEl = document.getElementById('import-error');
+  const submitBtn = document.getElementById('import-submit');
+  const url = urlInput.value.trim();
+
+  if (!url) {
+    errEl.textContent = '请输入歌单链接';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = '导入中...';
+  errEl.classList.add('hidden');
+
+  try {
+    const result = await importPlaylist(url);
+    document.getElementById('import-dialog').classList.add('hidden');
+    showToast(`已导入歌单「${result.playlistName}」(${result.songCount}首)`);
+  } catch (err) {
+    errEl.textContent = err.message || '导入失败';
+    errEl.classList.remove('hidden');
+    submitBtn.disabled = false;
+    submitBtn.textContent = '导入';
+  }
+});
 
 // ─── "新对话" and "历史" buttons ───────────────────────────────
 
@@ -312,9 +384,12 @@ async function loadChat() {
   try {
     const result = await triggerGreeting();
     const say = result.say || '哟，Claudio 在这儿呢。这会天气不错，要不要来首歌？';
-    render({ type: 'ai', sender: 'Claudio', text: say, time: new Date() });
-    if (result.play && result.play.length > 0) {
-      addToQueue([result.play[0]]);
+    const aiEl = render({ type: 'ai', sender: 'Claudio', text: say, time: new Date() });
+    const playable = (result.play || []).filter(s => s.url);
+    if (playable.length > 0) {
+      aiEl._songs = playable;
+      const fbContainer = renderFeedbackButtons(playable, aiEl.querySelector('.msg-body'));
+      wireSongFeedback(fbContainer, playable);
     }
   } catch {
     render({
@@ -324,6 +399,161 @@ async function loadChat() {
       time: new Date(),
     });
   }
+}
+
+// ─── Favorites panel ──────────────────────────────────────────
+
+let favoritesOpen = false;
+
+function closeFavorites() {
+  favoritesOpen = false;
+  document.getElementById('favorites-panel').classList.add('hidden');
+}
+
+async function openFavorites() {
+  favoritesOpen = true;
+  const panel = document.getElementById('favorites-panel');
+  const list = document.getElementById('favorites-list');
+  panel.classList.remove('hidden');
+  list.innerHTML = '<div class="favorites-loading"><span class="loading-spinner"></span>加载中...</div>';
+
+  try {
+    const { favorites } = await getFavorites();
+    if (favorites.length === 0) {
+      list.innerHTML = '<div class="favorites-empty">还没有收藏歌曲，给喜欢的歌点个赞吧 👍</div>';
+    } else {
+      list.innerHTML = favorites.map((f, i) => `
+        <div class="favorites-item" data-id="${f.id}">
+          <span class="favorites-index">${i + 1}</span>
+          <div class="favorites-song-info">
+            <span class="favorites-song-title">${escHtml(f.title)}</span>
+            <span class="favorites-song-artist">${escHtml(f.artist || '')}</span>
+          </div>
+          <button class="favorites-play" data-title="${escHtml(f.title)}" data-artist="${escHtml(f.artist || '')}" title="播放">▶</button>
+          <button class="favorites-del" data-id="${f.id}" title="取消收藏">×</button>
+        </div>
+      `).join('');
+
+      // Play button: search and add to queue
+      list.querySelectorAll('.favorites-play').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const title = btn.dataset.title;
+          const artist = btn.dataset.artist;
+          // Search the song via the same music search API
+          try {
+            const res = await fetch('/api/chat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ message: `播《${title}》${artist}` }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const playable = (data.play || []).filter(s => s.url);
+            if (playable.length > 0) {
+              addToQueue(playable);
+              showToast(`已加入: ${playable[0].title}`);
+            } else {
+              showToast('未找到可播放的资源');
+            }
+          } catch {
+            showToast('搜索失败');
+          }
+        });
+      });
+
+      // Delete button: remove from favorites
+      list.querySelectorAll('.favorites-del').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const id = btn.dataset.id;
+          try {
+            await removeFavorite(id);
+            const item = btn.closest('.favorites-item');
+            if (item) {
+              item.style.opacity = '0';
+              item.style.transition = 'opacity 0.2s';
+              setTimeout(() => {
+                item.remove();
+                // Update indices
+                list.querySelectorAll('.favorites-index').forEach((el, i) => { el.textContent = i + 1; });
+                if (list.querySelectorAll('.favorites-item').length === 0) {
+                  list.innerHTML = '<div class="favorites-empty">还没有收藏歌曲，给喜欢的歌点个赞吧 👍</div>';
+                }
+              }, 200);
+            }
+            showToast('已取消收藏');
+          } catch {
+            showToast('操作失败');
+          }
+        });
+      });
+    }
+  } catch {
+    list.innerHTML = '<div class="favorites-empty">加载失败，请重试</div>';
+  }
+}
+
+document.getElementById('btn-favorites').addEventListener('click', () => {
+  if (favoritesOpen) {
+    closeFavorites();
+  } else {
+    openFavorites();
+  }
+});
+
+document.getElementById('favorites-panel').querySelector('.favorites-panel-mask')
+  .addEventListener('click', closeFavorites);
+document.getElementById('favorites-close').addEventListener('click', closeFavorites);
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function wireSongFeedback(fbContainer, playableSongs) {
+  if (!fbContainer) return;
+
+  // Add play button to each row
+  fbContainer.querySelectorAll('.feedback-row').forEach((row, i) => {
+    const playBtn = document.createElement('button');
+    playBtn.className = 'fb-btn play';
+    playBtn.title = '加入播放';
+    playBtn.textContent = '▶';
+    playBtn.addEventListener('click', () => {
+      addToQueue([playableSongs[i]]);
+      showToast(`已加入: ${playableSongs[i].title}`);
+    });
+    const actions = row.querySelector('.feedback-actions');
+    if (actions) actions.appendChild(playBtn);
+  });
+
+  // Like → feedback + add to favorites
+  fbContainer.querySelectorAll('.fb-btn.like').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const s = playableSongs[parseInt(btn.dataset.idx)];
+      try {
+        await sendFeedback(s.title, s.artist, 'like');
+        try { await addFavorite(s.title, s.artist, 'ai_recommend'); } catch {}
+        showToast('已标记为喜欢，已加入收藏 ❤️');
+      }
+      catch { showToast('反馈失败'); }
+    });
+  });
+
+  // Dislike → feedback + skip current if playing
+  fbContainer.querySelectorAll('.fb-btn.dislike').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const s = playableSongs[parseInt(btn.dataset.idx)];
+      const cur = getCurrentSong();
+      if (cur && cur.title === s.title && cur.artist === s.artist) {
+        playNextSong();
+      }
+      try { await sendFeedback(s.title, s.artist, 'dislike'); showToast('已标记为不喜欢，以后少推'); }
+      catch { showToast('反馈失败'); }
+    });
+  });
 }
 
 loadChat();

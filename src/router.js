@@ -1,10 +1,9 @@
 const DIRECT_KEYWORDS = ['天气', '时间', '几点了', '帮助', 'help'];
-const MUSIC_KEYWORDS = ['播放', '来首', '想听', '放一首', '换首歌', '切歌', '下一首', '推荐首歌'];
 
 /**
  * Route user input to the correct handler.
  * @param {string} message
- * @returns {{ type: 'direct' | 'claude' | 'music', payload: string }}
+ * @returns {{ type: 'direct' | 'claude', payload: string }}
  */
 export function route(message) {
   const trimmed = (message || '').trim();
@@ -13,21 +12,14 @@ export function route(message) {
     return { type: 'claude', payload: '' };
   }
 
-  // Check music intent first to avoid substring collisions
-  for (const kw of MUSIC_KEYWORDS) {
-    if (trimmed.includes(kw)) {
-      return { type: 'music', payload: trimmed };
-    }
-  }
-
-  // Only pure utility queries go direct — everything else goes to Claude
+  // Only pure utility queries go direct — everything else goes to AI
   for (const kw of DIRECT_KEYWORDS) {
     if (trimmed.includes(kw)) {
       return { type: 'direct', payload: trimmed };
     }
   }
 
-  // Default: send to Claude for natural language understanding
+  // Default: send to AI for natural language understanding
   return { type: 'claude', payload: trimmed };
 }
 

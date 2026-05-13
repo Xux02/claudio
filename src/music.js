@@ -1,91 +1,52 @@
-import 'dotenv/config';
+import * as netease from './music/netease.js';
+import * as qq from './music/qq.js';
 
-const BASE = process.env.MUSIC_API_URL || 'http://localhost:4000';
-const COOKIE = process.env.MUSIC_U ? `MUSIC_U=${process.env.MUSIC_U}` : '';
+const PROVIDERS = [qq, netease];
 
-function auth(url) {
-  if (!COOKIE) return url;
-  return url + (url.includes('?') ? '&' : '?') + 'cookie=' + COOKIE;
-}
+export const providers = PROVIDERS.map(p => ({ provider: p.provider, name: p.name }));
 
+// Simple search: try providers in order, return first successful results
 export async function search(keyword, limit = 5) {
-  if (!keyword || !keyword.trim()) return [];
-  try {
-    const url = auth(`${BASE}/search?keywords=${encodeURIComponent(keyword)}&limit=${limit}`);
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data.code !== 200 || !data.result?.songs) return [];
-    return data.result.songs.slice(0, limit).map((s) => ({
-      id: String(s.id),
-      title: s.name,
-      artist: (s.artists || []).map((a) => a.name).join('/'),
-      album: s.album?.name || '',
-      duration: s.duration || 0,
-    }));
-  } catch (err) {
-    console.error('music.search error:', err.message);
-    return [];
+  for (const p of PROVIDERS) {
+    const results = await p.search(keyword, limit);
+    if (results.length > 0) return results;
   }
+  return [];
 }
 
-export async function getSongUrl(id) {
-  try {
-    const url = auth(`${BASE}/song/url?id=${id}`);
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data.code === 200 && data.data?.[0]?.url) {
-      return data.data[0].url;
-    }
-    return null;
-  } catch (err) {
-    console.error('music.getSongUrl error:', err.message);
-    return null;
+// For resolvePlaylist: search ALL providers, return per-provider arrays
+// Returns [{ provider, name, results }]
+export async function searchAll(keyword, limit = 5) {
+  const all = [];
+  for (const p of PROVIDERS) {
+    const results = await p.search(keyword, limit);
+    all.push({ provider: p.provider, name: p.name, results });
   }
+  return all;
 }
 
-export async function getLyric(id) {
-  try {
-    const url = auth(`${BASE}/lyric?id=${id}`);
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data.code === 200 && data.lrc?.lyric) {
-      return data.lrc.lyric;
-    }
-    return '';
-  } catch (err) {
-    console.error('music.getLyric error:', err.message);
-    return '';
-  }
+// getSongUrl by composite id "provider:realId" — plain numeric IDs default to netease
+export async function getSongUrl(compositeId) {
+  if (!compositeId) return null;
+  const colon = compositeId.indexOf(':');
+  if (colon === -1) return netease.getSongUrl(compositeId);
+  const provider = compositeId.slice(0, colon);
+  const id = compositeId.slice(colon + 1);
+  if (provider === 'qq') return qq.getSongUrl(id);
+  return netease.getSongUrl(id);
 }
 
-export async function loginByQR() {
-  try {
-    const keyRes = await fetch(`${BASE}/login/qr/key`);
-    const keyData = await keyRes.json();
-    if (keyData.code !== 200 || !keyData.data?.unikey) return null;
-    const unikey = keyData.data.unikey;
-
-    const qrRes = await fetch(`${BASE}/login/qr/create?key=${unikey}`);
-    const qrData = await qrRes.json();
-    if (qrData.code !== 200 || !qrData.data?.qrurl) return null;
-
-    return { qrUrl: qrData.data.qrurl, unikey };
-  } catch (err) {
-    console.error('music.loginByQR error:', err.message);
-    return null;
-  }
+// getLyric by composite id
+export async function getLyric(compositeId) {
+  if (!compositeId) return '';
+  const colon = compositeId.indexOf(':');
+  if (colon === -1) return netease.getLyric(compositeId);
+  const provider = compositeId.slice(0, colon);
+  const id = compositeId.slice(colon + 1);
+  if (provider === 'qq') return qq.getLyric(id);
+  return netease.getLyric(id);
 }
 
-export async function checkLoginStatus() {
-  try {
-    const res = await fetch(auth(`${BASE}/login/status`));
-    const data = await res.json();
-    if (data.data?.code === 200 && data.data?.profile) {
-      return { loggedIn: true, profile: data.data.profile };
-    }
-    return { loggedIn: false, profile: null };
-  } catch (err) {
-    console.error('music.checkLoginStatus error:', err.message);
-    return { loggedIn: false, profile: null };
-  }
-}
+// Re-export netease-specific auth functions (only netease supports these)
+export const loginByQR = netease.loginByQR;
+export const checkLoginStatus = netease.checkLoginStatus;

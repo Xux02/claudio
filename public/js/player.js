@@ -4,6 +4,7 @@ let currentIndex = -1;
 let playing = false;
 let clockTimer = null;
 let playlistOpen = false;
+let lastNotifiedKey = '';
 
 // ─── Audio element ───────────────────────────────────────────
 
@@ -148,9 +149,14 @@ function playIndex(i) {
   updateDisplay(song);
   syncPlayState(true);
   renderPlaylist();
-  document.dispatchEvent(new CustomEvent('claudio:nowPlaying', {
-    detail: { title: song.title, artist: song.artist || '' }
-  }));
+
+  const songKey = `${song.title}|${song.artist || ''}`;
+  if (songKey !== lastNotifiedKey) {
+    lastNotifiedKey = songKey;
+    document.dispatchEvent(new CustomEvent('claudio:nowPlaying', {
+      detail: { title: song.title, artist: song.artist || '' }
+    }));
+  }
 }
 
 function playNext() { playIndex(currentIndex + 1); }
@@ -258,6 +264,143 @@ export function playPrevSong() { playPrev(); }
 export function playNextSong() { playNext(); }
 
 export function setVolume(v) { getAudio().volume = v / 100; }
+
+// ─── Custom volume slider ─────────────────────────────────────
+
+let volValue = 65;
+let volDragging = false;
+let volFillValue = 65;
+let volRaf = null;
+let volPreMute = 65;
+
+function volSliderEl() { return document.getElementById('vol-slider'); }
+function volFillEl() { return volSliderEl()?.querySelector('.vol-track-fill'); }
+function volIconEl() { return document.getElementById('vol-icon'); }
+
+function volGetFraction(e) {
+  const rect = volSliderEl().getBoundingClientRect();
+  const x = e.touches ? e.touches[0].clientX : e.clientX;
+  return Math.max(0, Math.min(1, (x - rect.left) / rect.width));
+}
+
+function volUpdateIcon(v) {
+  const icon = volIconEl();
+  if (!icon) return;
+  icon.style.opacity = v === 0 ? '0.25' : '';
+}
+
+function volApplyValue(v, instant) {
+  volValue = v;
+  const fill = volFillEl();
+  const pct = v.toFixed(0) + '%';
+  if (fill) {
+    fill.style.width = pct;
+    if (instant) fill.style.transition = 'none';
+    else fill.style.transition = '';
+  }
+  volSliderEl().setAttribute('aria-valuenow', v);
+  volUpdateIcon(v);
+  setVolume(v);
+}
+
+function volSetValue(v) {
+  volValue = Math.max(0, Math.min(100, Math.round(v)));
+  volFillValue = volValue;
+  volApplyValue(volValue, true);
+}
+
+// rAF loop: fill chases target with spring-like tension during drag
+function volDragLoop() {
+  if (!volDragging) return;
+  volFillValue += (volValue - volFillValue) * 0.32;
+  const fill = volFillEl();
+  if (fill) fill.style.width = volFillValue.toFixed(0) + '%';
+  volRaf = requestAnimationFrame(volDragLoop);
+}
+
+function volOnPointerDown(e) {
+  const slider = volSliderEl();
+  if (!slider) return;
+  volDragging = true;
+  slider.classList.add('dragging');
+  volFillValue = volValue;
+  if (volRaf) cancelAnimationFrame(volRaf);
+
+  const newVal = Math.round(volGetFraction(e) * 100);
+  volValue = newVal;
+  volApplyValue(newVal, true);
+
+  volRaf = requestAnimationFrame(volDragLoop);
+  e.preventDefault();
+}
+
+function volOnPointerMove(e) {
+  if (!volDragging) return;
+  const newVal = Math.round(volGetFraction(e) * 100);
+  volValue = newVal;
+  const fill = volFillEl();
+  if (fill) fill.style.width = newVal.toFixed(0) + '%';
+  volSliderEl().setAttribute('aria-valuenow', newVal);
+  volUpdateIcon(newVal);
+  setVolume(newVal);
+}
+
+function volOnPointerUp() {
+  if (!volDragging) return;
+  volDragging = false;
+  const slider = volSliderEl();
+  if (slider) slider.classList.remove('dragging');
+  if (volRaf) cancelAnimationFrame(volRaf);
+
+  const fill = volFillEl();
+  if (fill) {
+    fill.style.transition = '';
+    fill.style.width = volValue.toFixed(0) + '%';
+  }
+}
+
+export function initVolumeSlider() {
+  const slider = volSliderEl();
+  if (!slider) return;
+
+  // Mouse
+  slider.addEventListener('mousedown', volOnPointerDown);
+  document.addEventListener('mousemove', volOnPointerMove);
+  document.addEventListener('mouseup', volOnPointerUp);
+
+  // Touch
+  slider.addEventListener('touchstart', volOnPointerDown, { passive: false });
+  document.addEventListener('touchmove', volOnPointerMove, { passive: false });
+  document.addEventListener('touchend', volOnPointerUp);
+
+  // Keyboard
+  slider.addEventListener('keydown', (e) => {
+    let delta = 0;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') delta = -5;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') delta = 5;
+    if (delta !== 0) {
+      e.preventDefault();
+      volSetValue(volValue + delta);
+    }
+  });
+
+  // Mute/unmute on VOL click
+  const icon = volIconEl();
+  if (icon) {
+    icon.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (volValue > 0) {
+        volPreMute = volValue;
+        volSetValue(0);
+      } else {
+        volSetValue(volPreMute);
+      }
+    });
+  }
+
+  // Initialize
+  volApplyValue(65, true);
+}
 
 // ─── Utilities ────────────────────────────────────────────────
 

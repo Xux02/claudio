@@ -1,10 +1,10 @@
 import './fetch-polyfill.js';
 import 'dotenv/config';
 import express from 'express';
-import { init as initDb, logMessage, deleteMessage, logPlay, getRecentPlays, getHistory, close as closeDb } from './state.js';
+import { init as initDb, logMessage, deleteMessage, logPlay, logFeedback, getRecentPlays, getRecentMessages, getTasteStats, getFeedback, getPref, setPref, addSkippedSong, getSkippedSongs, getProfileStats, getHistory, addFavorite, getFavorites, removeFavorite, clearAll, close as closeDb } from './state.js';
 import { route, handleDirect } from './router.js';
 import { build } from './context.js';
-import { search as musicSearch, getSongUrl } from './music.js';
+import { search as musicSearch, getSongUrl, searchAll as musicSearchAll } from './music.js';
 import { synthesize } from './tts.js';
 import { start as startScheduler, stop as stopScheduler, getSchedule } from './scheduler.js';
 import path from 'node:path';
@@ -49,13 +49,16 @@ function matchScore(result, wanted) {
   return score;
 }
 
-// Shared helper: resolve Claude's song list to real search results with URLs
+// Shared helper: resolve AI song list to real search results with URLs
+// Tries QQ first, falls back to NetEase if no good match or no URL
 async function resolvePlaylist(play) {
   const enriched = await Promise.all(play.map(async (song) => {
-    // Fetch more candidates so we can pick the best match
-    const results = await musicSearch(`${song.title} ${song.artist || ''}`, 5);
-    if (results.length > 0) {
-      // Score each result and pick the best
+    const keyword = `${song.title} ${song.artist || ''}`;
+    const providerResults = await musicSearchAll(keyword, 5);
+
+    for (const { provider, results } of providerResults) {
+      if (results.length === 0) continue;
+
       let best = results[0];
       let bestScore = matchScore(results[0], song);
       for (let i = 1; i < results.length; i++) {
@@ -63,22 +66,27 @@ async function resolvePlaylist(play) {
         if (s > bestScore) { best = results[i]; bestScore = s; }
       }
 
-      // Require at least title + artist match (score >= 13) to exclude covers
-      // 3 (title contains keyword) + 10 (artist contains keyword) = 13 minimum
+      // Require at least title + artist match (score >= 13)
       if (bestScore < 13) {
-        console.warn(`[resolve] No good match for "${song.title}" by ${song.artist || '?'} — best score ${bestScore}`);
-        return { title: song.title, artist: song.artist || '', reason: song.reason,
-          skipped: true, skipReason: 'no_good_match' };
+        console.warn(`[resolve] No good ${provider} match for "${song.title}" — best score ${bestScore}`);
+        continue; // try next provider
       }
 
-      const url = await getSongUrl(best.id);
-      return {
-        title: best.title,
-        artist: best.artist,
-        url: url || undefined,
-        reason: song.reason,
-      };
+      const url = await getSongUrl(`${provider}:${best.id}`);
+      if (url) {
+        console.log(`[resolve] "${song.title}" → ${provider} ✓`);
+        return {
+          title: best.title,
+          artist: best.artist,
+          url,
+          reason: song.reason,
+          provider,
+        };
+      }
+      console.warn(`[resolve] "${song.title}" matched on ${provider} but no URL (no copyright)`);
+      // fall through to next provider
     }
+
     return { title: song.title, artist: song.artist || '', reason: song.reason,
       skipped: true, skipReason: 'not_found' };
   }));
@@ -87,8 +95,10 @@ async function resolvePlaylist(play) {
 
 // Shared helper: run full trigger pipeline (Claude → music → TTS → persist)
 async function runTrigger(reason) {
-  const state = { getRecentPlays };
-  const ctx = build({ trigger: reason, input: '', state });
+  const city = process.env.CITY || '扬州';
+  const weather = await getWeather(city);
+  const state = { getRecentPlays, getRecentMessages, getTasteStats, getFeedback, getPref, getSkippedSongs };
+  const ctx = build({ trigger: reason, input: '', state, weather });
   const result = await ask(ctx);
 
   const playWithUrls = await resolvePlaylist(result.play);
@@ -129,47 +139,13 @@ app.post('/api/chat', async (req, res) => {
       return res.json({ say, play: [], reason: '', segue: '', userMessageId: userMsgId, messageId: aiMsgId });
     }
 
-    if (intent.type === 'music') {
-      if (!musicApiOk) {
-        const userMsgId = logMessage({ role: 'user', content: message });
-        const say = musicDownMessage();
-        const aiMsgId = logMessage({ role: 'assistant', content: say });
-        return res.json({ say, play: [], reason: '', segue: '', userMessageId: userMsgId, messageId: aiMsgId });
-      }
-
-      const keyword = intent.payload
-        .replace(/^(播放|来首|想听|放一首|换首歌|切歌|下一首|推荐首歌)/, '')
-        .trim();
-      const songs = await musicSearch(keyword || intent.payload, 5);
-
-      await Promise.all(songs.map(async (song) => {
-        song.url = await getSongUrl(song.id) || undefined;
-      }));
-
-      const userMsgId = logMessage({ role: 'user', content: message });
-      const say = songs.length > 0
-        ? `为你找到 ${songs.length} 首歌，希望你喜欢~`
-        : '抱歉，没有搜到相关歌曲，换个关键词试试？';
-      const aiMsgId = logMessage({ role: 'assistant', content: say });
-      for (const song of songs) {
-        logPlay({ song_id: song.id, title: song.title, artist: song.artist || '' });
-      }
-
-      return res.json({
-        say,
-        play: songs,
-        reason: songs.length > 0 ? `搜索"${keyword || intent.payload}"的结果` : '',
-        segue: '',
-        userMessageId: userMsgId,
-        messageId: aiMsgId,
-      });
-    }
-
-    // claude intent — persist user message first so it survives even if AI fails
+    // AI intent — persist user message first so it survives even if AI fails
     const userMsgId = logMessage({ role: 'user', content: message });
 
-    const state = { getRecentPlays };
-    const ctx = build({ trigger: 'chat', input: intent.payload, state });
+    const city = process.env.CITY || '扬州';
+    const weather = await getWeather(city);
+    const state = { getRecentPlays, getRecentMessages, getTasteStats, getFeedback, getPref, getSkippedSongs };
+    const ctx = build({ trigger: 'chat', input: intent.payload, state, weather });
 
     let result;
     try {
@@ -189,10 +165,38 @@ app.post('/api/chat', async (req, res) => {
     }
 
     // Resolve song URLs so the frontend can actually play them
-    const playWithUrls = musicApiOk ? await resolvePlaylist(result.play) : result.play.map(s => ({
+    let playWithUrls = musicApiOk ? await resolvePlaylist(result.play) : result.play.map(s => ({
       title: s.title, artist: s.artist || '', reason: s.reason,
       skipped: true, skipReason: 'music_api_down',
     }));
+
+    // Re-prompt if ALL recommendations are unavailable
+    const allSkipped = playWithUrls.length > 0 && playWithUrls.every(s => s.skipped);
+    if (allSkipped && musicApiOk) {
+      const names = playWithUrls.map(s => `《${s.title}》`).join('、');
+      console.log(`[server] All ${playWithUrls.length} songs skipped, re-prompting AI...`);
+
+      for (const s of result.play) {
+        addSkippedSong(s.title, s.artist || '');
+      }
+
+      const retryInput = `你推荐的${names}在当前音乐服务上都找不到可播放版本。请推荐其他可替代的热门歌曲（网易云或QQ音乐上常见的）。如果用户指定了语言或风格，务必尊重用户的选择。`;
+      const retryState = { getRecentPlays, getRecentMessages, getTasteStats, getFeedback, getPref, getSkippedSongs };
+      const retryCtx = build({ trigger: 'retry', input: retryInput, state: retryState, weather });
+
+      try {
+        const retryResult = await ask(retryCtx, { useReasoner: false });
+        playWithUrls = await resolvePlaylist(retryResult.play);
+
+        const retryPlayable = playWithUrls.filter(s => s.url);
+        if (retryPlayable.length > 0) {
+          result.say = retryResult.say || result.say;
+          result.reason = retryResult.reason || result.reason;
+        }
+      } catch (retryErr) {
+        console.error('[server] Retry AI call failed:', retryErr.message);
+      }
+    }
 
     // If music API is down, tell the user explicitly
     if (!musicApiOk) {
@@ -225,12 +229,18 @@ app.post('/api/chat', async (req, res) => {
     let say = result.say || '嗯，我在听。想听点什么歌吗？';
     const skipped = playWithUrls.filter(s => s.skipped);
     const playable = playWithUrls.filter(s => s.url);
+
+    // Persist skipped songs so AI learns to avoid them
+    for (const s of skipped) {
+      addSkippedSong(s.title, s.artist || '');
+    }
+
     if (skipped.length > 0 && playable.length === 0) {
       const names = skipped.map(s => `《${s.title}》`).join('、');
-      say += `\n\n${names} 在网易云暂时没有正版资源，换个歌试试？`;
+      say += `\n\n${names} 暂无正版资源，换个歌试试？`;
     } else if (skipped.length > 0) {
       const names = skipped.map(s => `《${s.title}》`).join('、');
-      say += `\n\n（${names} 没找到正版资源，已跳过）`;
+      say += `\n\n（${names} 没找到资源，已跳过）`;
     }
 
     return res.json({
@@ -283,6 +293,211 @@ app.get('/api/taste', (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// GET /api/profile — AI profile stats for the profile page
+app.get('/api/profile', (req, res) => {
+  try {
+    const stats = getProfileStats();
+    res.json(stats);
+  } catch (err) {
+    console.error('/api/profile error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Weather cache
+let weatherCache = null;
+let weatherCacheTime = 0;
+const WEATHER_CACHE_MS = 10 * 60 * 1000; // 10 minutes
+
+async function getWeather(city) {
+  if (weatherCache && Date.now() - weatherCacheTime < WEATHER_CACHE_MS) {
+    return weatherCache;
+  }
+  try {
+    const res = await fetch(`https://wttr.in/${encodeURIComponent(city)}?format=j1`);
+    if (!res.ok) throw new Error(`wttr.in ${res.status}`);
+    const data = await res.json();
+    const cur = data.current_condition?.[0] || {};
+    weatherCache = {
+      temp: cur.temp_C ? parseInt(cur.temp_C) : null,
+      desc: cur.weatherDesc?.[0]?.value || '',
+      humidity: cur.humidity || '',
+      wind: cur.winddir16Point || '',
+      icon: weatherIcon(cur.weatherCode),
+    };
+    weatherCacheTime = Date.now();
+    return weatherCache;
+  } catch (err) {
+    console.error('Weather fetch error:', err.message);
+    return weatherCache || { temp: null, desc: '未知', icon: '🌤️' };
+  }
+}
+
+function weatherIcon(code) {
+  const c = parseInt(code) || 0;
+  if (c === 113 || c === 116) return '☀️';
+  if (c <= 122 || c === 143) return '☁️';
+  if (c <= 182 || c === 185) return '🌧️';
+  if (c <= 199) return '🌫️';
+  if (c <= 266 || c === 281 || c === 284) return '🌦️';
+  if (c <= 299) return '🌧️';
+  if (c <= 320) return '🌧️';
+  if (c <= 353) return '🌦️';
+  if (c <= 374 || c === 395) return '❄️';
+  if (c <= 392) return '⛈️';
+  return '🌤️';
+}
+
+// GET /api/weather
+app.get('/api/weather', async (req, res) => {
+  try {
+    const city = process.env.CITY || '扬州';
+    const w = await getWeather(city);
+    res.json({ city, ...w });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/clear — clear all memory, taste, preferences
+app.post('/api/clear', (req, res) => {
+  try {
+    clearAll();
+    weatherCache = null;
+    weatherCacheTime = 0;
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('/api/clear error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/feedback — record like/dislike on a recommended song
+app.post('/api/feedback', (req, res) => {
+  try {
+    const { title, artist, rating } = req.body;
+    if (!title || !rating || !['like', 'dislike'].includes(rating)) {
+      return res.status(400).json({ error: 'title and rating (like/dislike) are required' });
+    }
+    logFeedback({ title, artist: artist || '', rating });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('/api/feedback error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/favorites — add a song to favorites
+app.post('/api/favorites', (req, res) => {
+  try {
+    const { title, artist, source } = req.body;
+    if (!title) {
+      return res.status(400).json({ error: 'title is required' });
+    }
+    const id = addFavorite({ title, artist: artist || '', source: source || '' });
+    return res.json({ ok: true, id });
+  } catch (err) {
+    console.error('/api/favorites error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/favorites — list all favorites
+app.get('/api/favorites', (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+    const favorites = getFavorites(limit);
+    res.json({ favorites });
+  } catch (err) {
+    console.error('/api/favorites error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/favorites/:id — remove a song from favorites
+app.delete('/api/favorites/:id', (req, res) => {
+  try {
+    const result = removeFavorite(req.params.id);
+    if (result.changes === 0) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('/api/favorites error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/import-playlist — import songs from a Netease playlist URL
+app.post('/api/import-playlist', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ error: 'url is required' });
+    }
+    if (!musicApiOk) {
+      return res.status(503).json({ error: musicDownMessage() });
+    }
+
+    // Extract playlist ID from URL (supports various formats)
+    const match = url.match(/[?&]id=(\d+)/);
+    if (!match) {
+      return res.status(400).json({ error: '无法解析歌单链接，请提供网易云歌单 URL（如 https://music.163.com/playlist?id=12345）' });
+    }
+    const playlistId = match[1];
+
+    // Fetch playlist details via Netease API
+    const playlistRes = await fetch(authMusicUrl(`${MUSIC_API_URL}/playlist/detail?id=${playlistId}`));
+    const playlistData = await playlistRes.json();
+    if (playlistData.code !== 200 || !playlistData.playlist) {
+      return res.status(404).json({ error: '歌单不存在或无法访问' });
+    }
+
+    const playlist = playlistData.playlist;
+    const tracks = (playlist.tracks || []).slice(0, 200); // Cap at 200 songs
+
+    const songs = tracks.map(t => ({
+      title: t.name || '',
+      artist: (t.ar || []).map(a => a.name).join('/'),
+      album: t.al?.name || '',
+    }));
+
+    // Store as pref (JSON blob in prefs table)
+    setPref(`imported_playlist_${playlistId}`, JSON.stringify({
+      name: playlist.name,
+      importedAt: new Date().toISOString(),
+      songCount: songs.length,
+      songs,
+    }));
+
+    // Update import index for AI context
+    const existingIndex = getPref('imported_playlist_index') || '';
+    const summary = `歌单《${playlist.name}》: ${songs.slice(0, 10).map(s => `《${s.title}》${s.artist}`).join('、')}${songs.length > 10 ? '等' + songs.length + '首' : ''}`;
+    const newIndex = existingIndex
+      ? existingIndex + '\n' + summary
+      : summary;
+    setPref('imported_playlist_index', newIndex);
+
+    // Also log to plays for taste learning
+    for (const s of songs.slice(0, 50)) {
+      logPlay({ title: s.title, artist: s.artist });
+    }
+
+    return res.json({
+      ok: true,
+      playlistName: playlist.name,
+      songCount: songs.length,
+    });
+  } catch (err) {
+    console.error('/api/import-playlist error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+function authMusicUrl(url) {
+  const COOKIE = process.env.MUSIC_U ? `MUSIC_U=${process.env.MUSIC_U}` : '';
+  if (!COOKIE) return url;
+  return url + (url.includes('?') ? '&' : '?') + 'cookie=' + COOKIE;
+}
 
 // GET /api/history — recent conversation history
 app.get('/api/history', (req, res) => {
@@ -345,22 +560,36 @@ const MUSIC_API_URL = process.env.MUSIC_API_URL || 'http://localhost:4000';
 let musicApiOk = false;
 
 async function healthCheck() {
+  // Check Netease
   try {
     const res = await fetch(`${MUSIC_API_URL}/search?keywords=test&limit=1`);
     if (res.ok) {
       musicApiOk = true;
-      console.log(`[server] Music API OK: ${MUSIC_API_URL}`);
+      console.log(`[server] Netease API OK: ${MUSIC_API_URL}`);
     } else {
-      console.warn(`[server] Music API returned ${res.status}, music features may not work`);
+      console.warn(`[server] Netease API returned ${res.status}`);
     }
   } catch {
-    console.warn(`[server] Music API unreachable at ${MUSIC_API_URL} — start it with:
+    console.warn(`[server] Netease API unreachable at ${MUSIC_API_URL} — start it with:
   PORT=4000 node node_modules/NeteaseCloudMusicApi/app.js &`);
+  }
+
+  // Check QQ Music (direct API, no external service needed)
+  if (process.env.QQ_MUSIC_KEY && process.env.QQ_MUSIC_UIN) {
+    const { search: qqSearch } = await import('./music/qq.js');
+    const qqResults = await qqSearch('晴天', 1);
+    if (qqResults.length > 0) {
+      console.log(`[server] QQ Music API OK (direct) — found "${qqResults[0].title}"`);
+    } else {
+      console.warn('[server] QQ Music API returned no results, cookie may be expired');
+    }
+  } else {
+    console.warn('[server] QQ Music not configured (QQ_MUSIC_KEY / QQ_MUSIC_UIN missing)');
   }
 }
 
 function musicDownMessage() {
-  return '音乐服务暂时离线，请确保网易云 API 已启动：\nPORT=4000 node node_modules/NeteaseCloudMusicApi/app.js &';
+  return '音乐服务暂时离线，请确保网易云和 QQ 音乐 API 已启动。';
 }
 
 const PORT = process.env.PORT || 8080;

@@ -30,7 +30,7 @@ function readFile(relPath) {
  * @param {Object} [opts.state] - state.js module for memory fetching
  * @returns {{persona: string, taste: string, env: string, memory: string, input: string, trigger: string}}
  */
-export function build({ trigger = '', input = '', state = null } = {}) {
+export function build({ trigger = '', input = '', state = null, weather = null } = {}) {
   // 1. DJ persona
   const persona = readFile('prompts/dj-persona.md');
 
@@ -55,24 +55,104 @@ export function build({ trigger = '', input = '', state = null } = {}) {
   });
   const hour = now.getHours();
   const city = process.env.CITY || '南京';
-  const env = [
+  const timeOfDay = hour < 6 ? '深夜' : hour < 9 ? '早晨' : hour < 12 ? '上午' : hour < 14 ? '中午' : hour < 18 ? '下午' : hour < 21 ? '傍晚' : '深夜';
+  const envLines = [
     `当前时间: ${timeStr}`,
     `城市: ${city}`,
-    `时段: ${hour < 6 ? '深夜' : hour < 9 ? '早晨' : hour < 12 ? '上午' : hour < 14 ? '中午' : hour < 18 ? '下午' : hour < 21 ? '傍晚' : '深夜'}`,
-  ].join('\n');
+    `时段: ${timeOfDay}`,
+  ];
+  if (weather) {
+    envLines.push(`天气: ${weather.desc} ${weather.temp !== null ? weather.temp + '°C' : ''}${weather.humidity ? ' 湿度' + weather.humidity + '%' : ''}${weather.wind ? ' ' + weather.wind : ''}`.trim());
+  }
+  const env = envLines.join('\n');
 
-  // 4. Memory - recent plays
+  // 4. Memory - recent plays + taste stats from actual listening
   let memory = '';
   if (state) {
     try {
       const recentPlays = state.getRecentPlays(10);
+      const tasteStats = state.getTasteStats ? state.getTasteStats() : null;
+
+      const parts = [];
+
       if (recentPlays.length > 0) {
-        memory =
+        parts.push(
           '近期播放:\n' +
-          recentPlays
-            .map((p) => `- ${p.title}${p.artist ? ' - ' + p.artist : ''}`)
-            .join('\n');
+            recentPlays
+              .map((p) => `- ${p.title}${p.artist ? ' - ' + p.artist : ''}`)
+              .join('\n')
+        );
       }
+
+      if (tasteStats && tasteStats.totalPlays > 0) {
+        const ta = tasteStats.topArtists;
+        const ra = tasteStats.recentArtists;
+        const ts = tasteStats.topSongs;
+
+        const tasteLines = [];
+        tasteLines.push(`用户总共播放了 ${tasteStats.totalPlays} 首歌`);
+
+        if (ta.length > 0) {
+          tasteLines.push('最常听的歌手: ' + ta.map(a => `${a.artist}(${a.cnt}次)`).join('、'));
+        }
+        if (ra.length > 0) {
+          tasteLines.push('近期口味: ' + ra.slice(0, 10).join('、'));
+        }
+        if (ts.length > 0) {
+          tasteLines.push('常听歌曲: ' + ts.map(s => `《${s.title}》${s.artist}`).join('、'));
+        }
+
+        parts.push('用户听歌统计（反映真实偏好）:\n' + tasteLines.join('\n'));
+      }
+
+      // Feedback history
+      if (state.getFeedback) {
+        const fb = state.getFeedback(20);
+        const fbLines = [];
+        if (fb.likes.length > 0) {
+          fbLines.push('用户喜欢的歌: ' + fb.likes.map(s => `《${s.title}》${s.artist || ''}`).join('、'));
+        }
+        if (fb.dislikes.length > 0) {
+          fbLines.push('用户不喜欢的歌: ' + fb.dislikes.map(s => `《${s.title}》${s.artist || ''}`).join('、'));
+        }
+        if (fbLines.length > 0) {
+          parts.push('用户反馈（喜欢/不喜欢的歌曲）:\n' + fbLines.join('\n'));
+        }
+      }
+
+      // Imported playlists
+      if (state.getPref) {
+        try {
+          const importedJson = state.getPref('imported_playlist_index');
+          if (importedJson) {
+            parts.push('用户导入的歌单:\n' + importedJson);
+          }
+        } catch { /* no imported playlists yet */ }
+      }
+
+      // Skipped songs (unavailable on Netease) — avoid recommending these
+      if (state.getSkippedSongs) {
+        try {
+          const skipped = state.getSkippedSongs(10);
+          if (skipped.length > 0) {
+            parts.push('近期无法播放的歌曲（避免推荐）:\n' +
+              skipped.map(s => `- 《${s.title}》${s.artist ? ' - ' + s.artist : ''}`).join('\n'));
+          }
+        } catch { /* no skipped songs module yet */ }
+      }
+
+      // Recent conversation — so AI remembers what was just said
+      if (state.getRecentMessages) {
+        try {
+          const msgs = state.getRecentMessages(20);
+          if (msgs.length > 0) {
+            parts.push('近期对话记录:\n' +
+              msgs.map(m => `[${m.role === 'user' ? '用户' : 'Claudio'}] ${m.content}`).join('\n'));
+          }
+        } catch { /* getRecentMessages not available */ }
+      }
+
+      memory = parts.join('\n\n');
     } catch {
       memory = '';
     }
