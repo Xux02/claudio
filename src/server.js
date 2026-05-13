@@ -324,12 +324,35 @@ async function getWeather(city) {
     if (!res.ok) throw new Error(`wttr.in ${res.status}`);
     const data = await res.json();
     const cur = data.current_condition?.[0] || {};
+    const astro = data.weather?.[0]?.astronomy?.[0] || {};
+    const hourly = data.weather?.[0]?.hourly || [];
+
+    // Find current hour's rain probability
+    const nowHour = new Date().getHours();
+    let rainProb = 0;
+    for (const h of hourly) {
+      const hTime = parseInt(h.time) || -1;
+      // hourly.time can be 0-23 or 0-2300 in 100s format
+      const hh = hTime >= 100 ? Math.floor(hTime / 100) : hTime;
+      if (hh === nowHour) {
+        rainProb = parseInt(h.chanceofrain) || 0;
+        break;
+      }
+    }
+
     weatherCache = {
       temp: cur.temp_C ? parseInt(cur.temp_C) : null,
       desc: cur.weatherDesc?.[0]?.value || '',
       humidity: cur.humidity || '',
       wind: cur.winddir16Point || '',
       icon: weatherIcon(cur.weatherCode),
+      feelsLike: cur.FeelsLikeC ? parseInt(cur.FeelsLikeC) : null,
+      uvIndex: cur.uvIndex || '',
+      visibility: cur.visibility || '',
+      pressure: cur.pressure || '',
+      sunrise: astro.sunrise || '',
+      sunset: astro.sunset || '',
+      rainProb,
     };
     weatherCacheTime = Date.now();
     return weatherCache;

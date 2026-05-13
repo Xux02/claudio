@@ -5,9 +5,12 @@ import { getCurrentMessages, saveCurrentMessages, archiveAndClear, getSavedSessi
 
 // ─── Weather / location ──────────────────────────────────────
 
+let weatherData = null;
+
 async function initWeather() {
   try {
-    const w = await getWeather();
+    weatherData = await getWeather();
+    const w = weatherData;
     document.getElementById('weather-icon').textContent = w.icon || '🌤️';
     document.getElementById('weather-text').textContent = `${w.city} · ${w.temp !== null ? w.temp + '°C' : '--'}  ${w.desc}`;
   } catch {
@@ -16,6 +19,46 @@ async function initWeather() {
   }
 }
 initWeather();
+
+document.getElementById('weather').addEventListener('click', () => {
+  showWeatherDetail();
+});
+
+function showWeatherDetail() {
+  const popup = document.getElementById('weather-detail');
+  const w = weatherData;
+  if (!w) {
+    // Refresh weather if no data
+    getWeather().then(d => {
+      weatherData = d;
+      fillWeatherDetail(d);
+    }).catch(() => {});
+  } else {
+    fillWeatherDetail(w);
+  }
+  popup.classList.remove('hidden');
+}
+
+function fillWeatherDetail(w) {
+  document.getElementById('wd-city').textContent = w.city || '--';
+  document.getElementById('wd-temp').textContent = w.temp !== null ? `${w.temp}°C ${w.desc}` : '--';
+  document.getElementById('wd-sunrise').textContent = w.sunrise || '--';
+  document.getElementById('wd-sunset').textContent = w.sunset || '--';
+  document.getElementById('wd-rain').textContent = w.rainProb !== undefined ? `${w.rainProb}%` : '--';
+  document.getElementById('wd-feels').textContent = w.feelsLike !== null ? `${w.feelsLike}°C` : '--';
+  document.getElementById('wd-humidity').textContent = w.humidity ? `${w.humidity}%` : '--';
+  document.getElementById('wd-wind').textContent = w.wind || '--';
+  document.getElementById('wd-uv').textContent = w.uvIndex || '--';
+  document.getElementById('wd-vis').textContent = w.visibility ? `${w.visibility}km` : '--';
+  document.getElementById('wd-pressure').textContent = w.pressure ? `${w.pressure}hPa` : '--';
+}
+
+function closeWeatherDetail() {
+  document.getElementById('weather-detail').classList.add('hidden');
+}
+
+document.getElementById('weather-detail').querySelector('.weather-detail-mask')
+  .addEventListener('click', closeWeatherDetail);
 
 const now = new Date();
 const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
