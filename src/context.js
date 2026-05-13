@@ -30,6 +30,56 @@ function readFile(relPath) {
  * @param {Object} [opts.state] - state.js module for memory fetching
  * @returns {{persona: string, taste: string, env: string, memory: string, input: string, trigger: string}}
  */
+function formatInsights(insights) {
+  if (!insights) return '';
+  const lines = [];
+
+  lines.push('## 学习到的偏好模式');
+
+  // Context-aware patterns
+  if (insights.liftedUp.length > 0 || insights.liftedDown.length > 0) {
+    const levelLabel = insights.levelUsed === 'global' ? '全局' : `当前情境（${insights.contextLabel}）`;
+    lines.push(`### ${levelLabel}`);
+    if (insights.contextSessionCount > 0) {
+      lines.push(`基于此情境的 ${insights.contextSessionCount} 个历史会话（衰减加权）：`);
+    }
+    if (insights.liftedUp.length > 0) {
+      lines.push('- 偏好度显著高于平时的：' + insights.liftedUp.map(a =>
+        `${a.artist}(↑${a.lift.toFixed(1)}x)`).join(', '));
+    }
+    if (insights.liftedDown.length > 0) {
+      lines.push('- 偏好度显著低于平时的：' + insights.liftedDown.map(a =>
+        `${a.artist}(↓${(1/a.lift).toFixed(1)}x)`).join(', '));
+    }
+    if (insights.recentContextSongs.length > 0) {
+      lines.push('- 此情境近期常播：' + insights.recentContextSongs.map(s =>
+        `${s.artist} - ${s.title}`).join('、'));
+    }
+  }
+
+  // Trend
+  if (insights.trend) {
+    lines.push('### 听歌趋势（近两周 vs 前两周）');
+    if (insights.trend.rising.length > 0) {
+      lines.push('- 最近听得更多的：' + insights.trend.rising.join('、'));
+    }
+    if (insights.trend.declining.length > 0) {
+      lines.push('- 最近听得更少的：' + insights.trend.declining.join('、'));
+    }
+  }
+
+  // Weather signal
+  if (insights.weatherSignal) {
+    lines.push(`### 今日特别信号`);
+    lines.push(`- ${insights.weatherSignal.desc}天你通常喜欢：` +
+      insights.weatherSignal.artists.map(a =>
+        `${a.artist}(↑${a.lift.toFixed(1)}x)`).join(', ') +
+      `（基于 ${insights.weatherSignal.sessionCount} 个${insights.weatherSignal.desc}天会话）`);
+  }
+
+  return lines.join('\n');
+}
+
 export function build({ trigger = '', input = '', state = null, weather = null } = {}) {
   // 1. DJ persona
   const persona = readFile('prompts/dj-persona.md');
@@ -103,6 +153,24 @@ export function build({ trigger = '', input = '', state = null, weather = null }
         }
 
         parts.push('用户听歌统计（反映真实偏好）:\n' + tasteLines.join('\n'));
+      }
+
+      // Learned preference patterns (Bayesian + context-aware)
+      if (state.getContextInsights) {
+        try {
+          const now2 = new Date();
+          const hr = now2.getHours();
+          const dow = now2.getDay();
+          const we = (dow === 0 || dow === 6) ? 1 : 0;
+          const tod = hr < 6 ? '深夜' : hr < 9 ? '早晨' : hr < 12 ? '上午'
+            : hr < 14 ? '中午' : hr < 18 ? '下午' : hr < 21 ? '傍晚' : '深夜';
+          const wd = weather?.desc || '';
+          const insights = state.getContextInsights({ timeOfDay: tod, dayOfWeek: dow, isWeekend: we, weatherDesc: wd });
+          if (insights) {
+            const formatted = formatInsights(insights);
+            if (formatted) parts.push(formatted);
+          }
+        } catch { /* preference learning not critical */ }
       }
 
       // Feedback history

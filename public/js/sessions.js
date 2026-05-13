@@ -1,5 +1,6 @@
 const CURRENT_KEY = 'claudio_current_messages';
 const ARCHIVE_KEY = 'claudio_saved_sessions';
+const SYNC_KEY = 'claudio_last_sync';
 
 export function getCurrentMessages() {
   try {
@@ -24,7 +25,7 @@ export function archiveAndClear() {
   const preview = firstMsg ? firstMsg.content.slice(0, 50) : '空对话';
 
   sessions.unshift({
-    id: Date.now(),
+    id: generateSessionId(),
     date: new Date().toISOString().slice(0, 10),
     preview,
     messageCount: messages.length,
@@ -69,6 +70,72 @@ export function deleteSession(id) {
   try {
     localStorage.setItem(ARCHIVE_KEY, JSON.stringify(sessions));
   } catch { /* ignore */ }
+}
+
+// ─── Cloud sync ─────────────────────────────────────────────────
+
+export function generateSessionId() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback: timestamp + random for older browsers
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export function getLastSyncTime() {
+  try {
+    return localStorage.getItem(SYNC_KEY) || null;
+  } catch { return null; }
+}
+
+export function setLastSyncTime(iso) {
+  try {
+    localStorage.setItem(SYNC_KEY, iso);
+  } catch { /* ignore */ }
+}
+
+export async function syncNow() {
+  const { syncSessions } = await import('./api.js');
+
+  // Gather current session (if non-empty) + all saved sessions
+  const current = getCurrentMessages();
+  const saved = getSavedSessions();
+  const allLocal = [...saved];
+
+  // Include current live session as a saved entry if it has messages
+  if (current && current.length > 0) {
+    const firstMsg = current.find(m => m.role === 'user');
+    const preview = firstMsg ? firstMsg.content.slice(0, 50) : '';
+    allLocal.unshift({
+      id: `current-${generateSessionId()}`,
+      date: new Date().toISOString().slice(0, 10),
+      preview,
+      messageCount: current.length,
+      messages: current,
+    });
+  }
+
+  if (allLocal.length === 0) {
+    // Nothing to push — still pull from server
+    try {
+      const { sessions } = await syncSessions([]);
+      localStorage.setItem(ARCHIVE_KEY, JSON.stringify(sessions));
+      setLastSyncTime(new Date().toISOString());
+      return { ok: true, sessionCount: sessions.length };
+    } catch {
+      return { ok: false, error: 'network' };
+    }
+  }
+
+  try {
+    const { sessions } = await syncSessions(allLocal);
+    // Replace local saved sessions with server's canonical list
+    localStorage.setItem(ARCHIVE_KEY, JSON.stringify(sessions));
+    setLastSyncTime(new Date().toISOString());
+    return { ok: true, sessionCount: sessions.length };
+  } catch {
+    return { ok: false, error: 'network' };
+  }
 }
 
 // ─── UI ────────────────────────────────────────────────────────
@@ -133,7 +200,7 @@ export function showSessionPicker(onSelect) {
   overlay.querySelectorAll('.session-item').forEach(el => {
     el.addEventListener('click', (e) => {
       if (e.target.classList.contains('session-item-del')) return;
-      const id = parseInt(el.dataset.id);
+      const id = el.dataset.id;
       overlay.remove();
       if (onSelect) onSelect(id);
     });
@@ -143,7 +210,7 @@ export function showSessionPicker(onSelect) {
   overlay.querySelectorAll('.session-item-del').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const id = parseInt(btn.closest('.session-item').dataset.id);
+      const id = btn.closest('.session-item').dataset.id;
       deleteSession(id);
       btn.closest('.session-item').remove();
       // If all deleted, close picker

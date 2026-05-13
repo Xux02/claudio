@@ -97,7 +97,7 @@ describe('player module', () => {
   });
 
   describe('initVisualizer', () => {
-    it('creates 14 bars with unique animation delays', async () => {
+    it('creates 14 bars with initial height 3px', async () => {
       document.body.innerHTML = '<div id="visualizer"></div>';
       const { initVisualizer } = await import('../public/js/player.js');
 
@@ -105,9 +105,9 @@ describe('player module', () => {
 
       const bars = document.querySelectorAll('#visualizer .bar');
       expect(bars.length).toBe(14);
-      const delays = [...bars].map(b => b.style.animationDelay);
-      const unique = new Set(delays);
-      expect(unique.size).toBe(14);
+      for (const bar of bars) {
+        expect(bar.style.height).toBe('3px');
+      }
     });
   });
 

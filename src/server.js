@@ -1,7 +1,7 @@
 import './fetch-polyfill.js';
 import 'dotenv/config';
 import express from 'express';
-import { init as initDb, logMessage, deleteMessage, logPlay, logFeedback, getRecentPlays, getRecentMessages, getTasteStats, getFeedback, getPref, setPref, addSkippedSong, getSkippedSongs, getProfileStats, getHistory, addFavorite, getFavorites, removeFavorite, clearAll, close as closeDb } from './state.js';
+import { init as initDb, logMessage, deleteMessage, logPlay, logFeedback, getRecentPlays, getRecentMessages, getTasteStats, getFeedback, getPref, setPref, addSkippedSong, getSkippedSongs, getProfileStats, getHistory, addFavorite, getFavorites, removeFavorite, clearAll, close as closeDb, upsertSession, getAllSessions, getSession, deleteSession, getCurrentContext, getActiveSessionId, getContextInsights } from './state.js';
 import { route, handleDirect } from './router.js';
 import { build } from './context.js';
 import { search as musicSearch, getSongUrl, searchAll as musicSearchAll } from './music.js';
@@ -19,7 +19,7 @@ const { ask } = aiModule;
 console.log(`[server] AI provider: ${AI_PROVIDER}`);
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -97,12 +97,15 @@ async function resolvePlaylist(play) {
 async function runTrigger(reason) {
   const city = process.env.CITY || '扬州';
   const weather = await getWeather(city);
-  const state = { getRecentPlays, getRecentMessages, getTasteStats, getFeedback, getPref, getSkippedSongs };
+  const state = { getRecentPlays, getRecentMessages, getTasteStats, getFeedback, getPref, getSkippedSongs, getContextInsights };
   const ctx = build({ trigger: reason, input: '', state, weather });
   const result = await ask(ctx);
 
   const playWithUrls = await resolvePlaylist(result.play);
   const ttsPath = await synthesize(result.say);
+
+  const context = getCurrentContext(weather);
+  const sessionId = getActiveSessionId();
 
   logMessage({
     role: 'assistant',
@@ -110,7 +113,7 @@ async function runTrigger(reason) {
     meta: { songs: playWithUrls, reason: result.reason, segue: result.segue },
   });
   for (const song of playWithUrls) {
-    logPlay({ song_id: song.id || null, title: song.title, artist: song.artist || '' });
+    logPlay({ song_id: song.id || null, title: song.title, artist: song.artist || '', sessionId, context });
   }
 
   return {
@@ -144,7 +147,9 @@ app.post('/api/chat', async (req, res) => {
 
     const city = process.env.CITY || '扬州';
     const weather = await getWeather(city);
-    const state = { getRecentPlays, getRecentMessages, getTasteStats, getFeedback, getPref, getSkippedSongs };
+    const context = getCurrentContext(weather);
+    const sessionId = getActiveSessionId();
+    const state = { getRecentPlays, getRecentMessages, getTasteStats, getFeedback, getPref, getSkippedSongs, getContextInsights };
     const ctx = build({ trigger: 'chat', input: intent.payload, state, weather });
 
     let result;
@@ -181,7 +186,7 @@ app.post('/api/chat', async (req, res) => {
       }
 
       const retryInput = `你推荐的${names}在当前音乐服务上都找不到可播放版本。请推荐其他可替代的热门歌曲（网易云或QQ音乐上常见的）。如果用户指定了语言或风格，务必尊重用户的选择。`;
-      const retryState = { getRecentPlays, getRecentMessages, getTasteStats, getFeedback, getPref, getSkippedSongs };
+      const retryState = { getRecentPlays, getRecentMessages, getTasteStats, getFeedback, getPref, getSkippedSongs, getContextInsights };
       const retryCtx = build({ trigger: 'retry', input: retryInput, state: retryState, weather });
 
       try {
@@ -222,7 +227,7 @@ app.post('/api/chat', async (req, res) => {
       meta: { songs: playWithUrls, reason: result.reason, segue: result.segue },
     });
     for (const song of playWithUrls) {
-      logPlay({ title: song.title, artist: song.artist || '' });
+      logPlay({ title: song.title, artist: song.artist || '', sessionId, context });
     }
 
     // Build response: append skip notice when songs can't be matched to real tracks
@@ -380,7 +385,9 @@ app.post('/api/feedback', (req, res) => {
     if (!title || !rating || !['like', 'dislike'].includes(rating)) {
       return res.status(400).json({ error: 'title and rating (like/dislike) are required' });
     }
-    logFeedback({ title, artist: artist || '', rating });
+    const fbCtx = getCurrentContext();
+    const fbSid = getActiveSessionId();
+    logFeedback({ title, artist: artist || '', rating, sessionId: fbSid, context: fbCtx });
     return res.json({ ok: true });
   } catch (err) {
     console.error('/api/feedback error:', err);
@@ -478,8 +485,10 @@ app.post('/api/import-playlist', async (req, res) => {
     setPref('imported_playlist_index', newIndex);
 
     // Also log to plays for taste learning
+    const impCtx = getCurrentContext();
+    const impSid = getActiveSessionId();
     for (const s of songs.slice(0, 50)) {
-      logPlay({ title: s.title, artist: s.artist });
+      logPlay({ title: s.title, artist: s.artist, sessionId: impSid, context: impCtx });
     }
 
     return res.json({
@@ -517,6 +526,119 @@ app.delete('/api/messages/:id', (req, res) => {
     if (result.changes === 0) return res.status(404).json({ error: 'not found' });
     res.json({ ok: true });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/search — direct music search (no AI involved)
+app.get('/api/search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q || q.length < 1) return res.status(400).json({ error: 'q is required' });
+    const limit = Math.min(parseInt(req.query.limit) || 10, 20);
+    const providerResults = await musicSearchAll(q, limit);
+
+    // Flatten results from all providers and enrich with URLs
+    const allResults = [];
+    for (const { provider, results } of providerResults) {
+      for (const r of results) {
+        allResults.push({ ...r, provider });
+      }
+    }
+
+    // Enrich top results with URLs (limit to 5 URL lookups total)
+    const enriched = await Promise.all(
+      allResults.slice(0, limit).map(async (r) => {
+        try {
+          const url = await getSongUrl(`${r.provider}:${r.id}`);
+          return { ...r, url: url || null };
+        } catch {
+          return { ...r, url: null };
+        }
+      })
+    );
+
+    res.json({ results: enriched });
+  } catch (err) {
+    console.error('/api/search error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Sessions API ────────────────────────────────────────────────
+
+// GET /api/sessions — list all sessions (metadata only, no messages body)
+app.get('/api/sessions', (req, res) => {
+  try {
+    const sessions = getAllSessions().map(s => ({
+      id: s.id,
+      date: s.date,
+      preview: s.preview,
+      messageCount: s.messageCount,
+      updatedAt: s.updatedAt,
+    }));
+    res.json({ sessions });
+  } catch (err) {
+    console.error('/api/sessions error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/sessions/:id — get a single session with full messages
+app.get('/api/sessions/:id', (req, res) => {
+  try {
+    const session = getSession(req.params.id);
+    if (!session) return res.status(404).json({ error: 'session not found' });
+    res.json(session);
+  } catch (err) {
+    console.error('/api/sessions/:id error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/sessions/:id — delete a session
+app.delete('/api/sessions/:id', (req, res) => {
+  try {
+    const result = deleteSession(req.params.id);
+    if (result.changes === 0) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('/api/sessions/:id error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/sessions/sync — push local sessions, get canonical list back
+app.post('/api/sessions/sync', (req, res) => {
+  try {
+    const { sessions } = req.body;
+    if (!Array.isArray(sessions)) {
+      return res.status(400).json({ error: 'sessions must be an array' });
+    }
+    if (sessions.length > 50) {
+      return res.status(400).json({ error: 'too many sessions (max 50)' });
+    }
+
+    // Upsert each incoming session
+    for (const s of sessions) {
+      if (!s.id || !Array.isArray(s.messages)) continue;
+      upsertSession({
+        id: String(s.id),
+        messages: s.messages,
+        date: s.date || new Date().toISOString().slice(0, 10),
+        preview: String(s.preview || '').slice(0, 100),
+        messageCount: s.messageCount || s.messages.length,
+      });
+    }
+
+    // Return all sessions as canonical list
+    const all = getAllSessions();
+    res.json({
+      sessions: all,
+      syncedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('/api/sessions/sync error:', err);
     res.status(500).json({ error: err.message });
   }
 });

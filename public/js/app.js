@@ -1,7 +1,7 @@
-import { chatWithRetry, getHistory, deleteMsg, triggerGreeting, sendFeedback, importPlaylist, getWeather, addFavorite, getFavorites, removeFavorite, clearMemory } from './api.js';
+import { chatWithRetry, getHistory, deleteMsg, triggerGreeting, sendFeedback, importPlaylist, getWeather, addFavorite, getFavorites, removeFavorite, clearMemory, searchMusic } from './api.js';
 import { initVisualizer, addToQueue, setPlaying, togglePlay, playPrevSong, playNextSong, initVolumeSlider, startClock, togglePlaylist, getCurrentSong } from './player.js';
-import { render, clearInput, scrollBottom, showToast, saveAvatar, renderSystemMsg, renderFeedbackButtons, renderThinkingBubble, removeThinkingBubble, initElasticScroll } from './chat.js';
-import { getCurrentMessages, saveCurrentMessages, archiveAndClear, getSavedSessions, loadSession, showSessionBar, showSessionPicker } from './sessions.js';
+import { render, clearInput, scrollBottom, showToast, saveAvatar, renderSystemMsg, renderFeedbackButtons, renderThinkingBubble, removeThinkingBubble, initElasticScroll, streamText } from './chat.js';
+import { getCurrentMessages, saveCurrentMessages, archiveAndClear, getSavedSessions, loadSession, showSessionBar, showSessionPicker, syncNow, getLastSyncTime } from './sessions.js';
 
 // ─── Weather / location ──────────────────────────────────────
 
@@ -42,6 +42,43 @@ document.getElementById('btn-prev').addEventListener('click', playPrevSong);
 document.getElementById('btn-next').addEventListener('click', playNextSong);
 document.getElementById('btn-playlist').addEventListener('click', togglePlaylist);
 
+// ─── Sync button ───────────────────────────────────────────────
+
+document.getElementById('btn-sync').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-sync');
+  btn.classList.add('syncing');
+  btn.textContent = '⏳';
+  try {
+    const result = await syncNow();
+    if (result.ok) {
+      updateSyncIndicator('synced');
+      showToast(`已同步 ${result.sessionCount} 个会话`);
+    } else {
+      updateSyncIndicator('error');
+      showToast('同步失败，请重试');
+    }
+  } catch {
+    updateSyncIndicator('error');
+    showToast('同步失败，网络不可达');
+  } finally {
+    btn.classList.remove('syncing');
+    btn.textContent = '☁️';
+  }
+});
+
+function updateSyncIndicator(state) {
+  const btn = document.getElementById('btn-sync');
+  btn.classList.remove('syncing', 'error', 'synced');
+  if (state === 'synced') {
+    btn.classList.add('synced');
+    const last = getLastSyncTime();
+    btn.title = last ? `已同步 · ${last.slice(11, 19)}` : '已同步';
+  } else if (state === 'error') {
+    btn.classList.add('error');
+    btn.title = '同步失败，点击重试';
+  }
+}
+
 // ─── Send message ────────────────────────────────────────────
 
 // Track the last user-message DOM element so we can attach DB id later
@@ -61,7 +98,8 @@ async function sendMessage() {
     const result = await chatWithRetry(text);
     removeThinkingBubble();
     const say = result.say || '嗯...信号不太好，你刚说什么？';
-    lastAiEl = render({ type: 'ai', sender: 'Claudio', text: say, time: new Date() });
+    lastAiEl = render({ type: 'ai', sender: 'Claudio', text: '', time: new Date() });
+    const bubble = lastAiEl.querySelector('.bubble');
 
     // Attach DB ids for later deletion
     if (result.userMessageId && lastUserEl) {
@@ -79,14 +117,22 @@ async function sendMessage() {
       wireSongFeedback(fbContainer, playableSongs);
     }
 
+    // Stream the text character by character
+    if (bubble) await streamText(bubble, say);
+
     // Persist to localStorage after each exchange
     persistCurrent();
+    syncNow().then(r => { if (r.ok) updateSyncIndicator('synced'); }).catch(() => {});
   } catch (err) {
     removeThinkingBubble();
     // Server unreachable — show fallback locally
-    const el = render({ type: 'ai', sender: 'Claudio', text: '啧，刚走神了，你再说一遍？', time: new Date() });
+    const el = render({ type: 'ai', sender: 'Claudio', text: '', time: new Date() });
     if (lastUserEl) lastUserEl.dataset.msgId = '';
-    if (el) el.dataset.msgId = '';
+    if (el) {
+      el.dataset.msgId = '';
+      const bubble = el.querySelector('.bubble');
+      if (bubble) streamText(bubble, '啧，刚走神了，你再说一遍？', 25);
+    }
     persistCurrent();
     console.error('Chat error:', err);
   }
@@ -224,7 +270,7 @@ async function startNewChat() {
     const result = await triggerGreeting();
     removeThinkingBubble();
     const say = result.say || '哟，Claudio 在这儿呢。今天想听点什么？';
-    const aiEl = render({ type: 'ai', sender: 'Claudio', text: say, time: new Date() });
+    const aiEl = render({ type: 'ai', sender: 'Claudio', text: '', time: new Date() });
     // Show playable songs with play button but don't auto-add
     const playable = (result.play || []).filter(s => s.url);
     if (playable.length > 0) {
@@ -232,14 +278,18 @@ async function startNewChat() {
       const fbContainer = renderFeedbackButtons(playable, aiEl.querySelector('.msg-body'));
       wireSongFeedback(fbContainer, playable);
     }
+    const bubble = aiEl.querySelector('.bubble');
+    if (bubble) await streamText(bubble, say);
   } catch {
     removeThinkingBubble();
-    render({
+    const el = render({
       type: 'ai',
       sender: 'Claudio',
-      text: '哟，Claudio 在这儿呢。这会天气不错，要不要来首歌？',
+      text: '',
       time: new Date(),
     });
+    const bubble = el.querySelector('.bubble');
+    if (bubble) streamText(bubble, '哟，Claudio 在这儿呢。这会天气不错，要不要来首歌？', 25);
   }
 }
 
@@ -384,26 +434,56 @@ async function loadChat() {
   try {
     const result = await triggerGreeting();
     const say = result.say || '哟，Claudio 在这儿呢。这会天气不错，要不要来首歌？';
-    const aiEl = render({ type: 'ai', sender: 'Claudio', text: say, time: new Date() });
+    const aiEl = render({ type: 'ai', sender: 'Claudio', text: '', time: new Date() });
     const playable = (result.play || []).filter(s => s.url);
     if (playable.length > 0) {
       aiEl._songs = playable;
       const fbContainer = renderFeedbackButtons(playable, aiEl.querySelector('.msg-body'));
       wireSongFeedback(fbContainer, playable);
     }
+    const bubble = aiEl.querySelector('.bubble');
+    if (bubble) await streamText(bubble, say);
   } catch {
-    render({
+    const el = render({
       type: 'ai',
       sender: 'Claudio',
-      text: '哟，Claudio 在这儿呢。这会天气不错，要不要来首歌？',
+      text: '',
       time: new Date(),
     });
+    const bubble = el.querySelector('.bubble');
+    if (bubble) streamText(bubble, '哟，Claudio 在这儿呢。这会天气不错，要不要来首歌？', 25);
   }
 }
 
 // ─── Favorites panel ──────────────────────────────────────────
 
+const FAV_CACHE_KEY = 'claudio_favorites_cache';
 let favoritesOpen = false;
+
+function getFavoritesCache() {
+  try { return JSON.parse(localStorage.getItem(FAV_CACHE_KEY)) || []; } catch { return []; }
+}
+function setFavoritesCache(favs) {
+  try { localStorage.setItem(FAV_CACHE_KEY, JSON.stringify(favs)); } catch {}
+}
+
+function renderFavoritesList(list, favorites) {
+  if (favorites.length === 0) {
+    list.innerHTML = '<div class="favorites-empty">还没有收藏歌曲，给喜欢的歌点个赞吧 👍</div>';
+    return;
+  }
+  list.innerHTML = favorites.map((f, i) => `
+    <div class="favorites-item" data-id="${f.id}">
+      <span class="favorites-index">${i + 1}</span>
+      <div class="favorites-song-info">
+        <span class="favorites-song-title">${escHtml(f.title)}</span>
+        <span class="favorites-song-artist">${escHtml(f.artist || '')}</span>
+      </div>
+      <button class="favorites-play" data-title="${escHtml(f.title)}" data-artist="${escHtml(f.artist || '')}" title="播放">▶</button>
+      <button class="favorites-del" data-id="${f.id}" title="取消收藏">×</button>
+    </div>
+  `).join('');
+}
 
 function closeFavorites() {
   favoritesOpen = false;
@@ -415,83 +495,77 @@ async function openFavorites() {
   const panel = document.getElementById('favorites-panel');
   const list = document.getElementById('favorites-list');
   panel.classList.remove('hidden');
-  list.innerHTML = '<div class="favorites-loading"><span class="loading-spinner"></span>加载中...</div>';
+
+  // Show cached favorites immediately (instant first paint)
+  const cached = getFavoritesCache();
+  if (cached.length > 0) {
+    renderFavoritesList(list, cached);
+    wireFavoritesActions(list);
+  } else {
+    list.innerHTML = '<div class="favorites-loading"><span class="loading-spinner"></span>加载中...</div>';
+  }
 
   try {
     const { favorites } = await getFavorites();
-    if (favorites.length === 0) {
-      list.innerHTML = '<div class="favorites-empty">还没有收藏歌曲，给喜欢的歌点个赞吧 👍</div>';
-    } else {
-      list.innerHTML = favorites.map((f, i) => `
-        <div class="favorites-item" data-id="${f.id}">
-          <span class="favorites-index">${i + 1}</span>
-          <div class="favorites-song-info">
-            <span class="favorites-song-title">${escHtml(f.title)}</span>
-            <span class="favorites-song-artist">${escHtml(f.artist || '')}</span>
-          </div>
-          <button class="favorites-play" data-title="${escHtml(f.title)}" data-artist="${escHtml(f.artist || '')}" title="播放">▶</button>
-          <button class="favorites-del" data-id="${f.id}" title="取消收藏">×</button>
-        </div>
-      `).join('');
-
-      // Play button: search and add to queue
-      list.querySelectorAll('.favorites-play').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          const title = btn.dataset.title;
-          const artist = btn.dataset.artist;
-          // Search the song via the same music search API
-          try {
-            const res = await fetch('/api/chat', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message: `播《${title}》${artist}` }),
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            const playable = (data.play || []).filter(s => s.url);
-            if (playable.length > 0) {
-              addToQueue(playable);
-              showToast(`已加入: ${playable[0].title}`);
-            } else {
-              showToast('未找到可播放的资源');
-            }
-          } catch {
-            showToast('搜索失败');
-          }
-        });
-      });
-
-      // Delete button: remove from favorites
-      list.querySelectorAll('.favorites-del').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          const id = btn.dataset.id;
-          try {
-            await removeFavorite(id);
-            const item = btn.closest('.favorites-item');
-            if (item) {
-              item.style.opacity = '0';
-              item.style.transition = 'opacity 0.2s';
-              setTimeout(() => {
-                item.remove();
-                // Update indices
-                list.querySelectorAll('.favorites-index').forEach((el, i) => { el.textContent = i + 1; });
-                if (list.querySelectorAll('.favorites-item').length === 0) {
-                  list.innerHTML = '<div class="favorites-empty">还没有收藏歌曲，给喜欢的歌点个赞吧 👍</div>';
-                }
-              }, 200);
-            }
-            showToast('已取消收藏');
-          } catch {
-            showToast('操作失败');
-          }
-        });
-      });
-    }
+    setFavoritesCache(favorites);
+    renderFavoritesList(list, favorites);
+    wireFavoritesActions(list);
   } catch {
-    list.innerHTML = '<div class="favorites-empty">加载失败，请重试</div>';
+    // If fetch fails, keep showing cached data; only show error if no cache
+    if (cached.length === 0) {
+      list.innerHTML = '<div class="favorites-empty">加载失败，请重试</div>';
+    }
   }
+}
+
+function wireFavoritesActions(list) {
+  list.querySelectorAll('.favorites-play').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const title = btn.dataset.title;
+      const artist = btn.dataset.artist;
+      const keyword = `${title} ${artist}`.trim();
+      try {
+        const { results } = await searchMusic(keyword);
+        const playable = results.filter(s => s.url);
+        if (playable.length > 0) {
+          addToQueue(playable);
+          showToast(`已加入: ${playable[0].title}`);
+        } else {
+          showToast('未找到可播放的资源');
+        }
+      } catch {
+        showToast('搜索失败');
+      }
+    });
+  });
+
+  list.querySelectorAll('.favorites-del').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      try {
+        await removeFavorite(id);
+        const favs = getFavoritesCache().filter(f => f.id !== id);
+        setFavoritesCache(favs);
+        const item = btn.closest('.favorites-item');
+        if (item) {
+          item.style.opacity = '0';
+          item.style.transition = 'opacity 0.2s';
+          setTimeout(() => {
+            item.remove();
+            list.querySelectorAll('.favorites-index').forEach((el, i) => { el.textContent = i + 1; });
+            if (list.querySelectorAll('.favorites-item').length === 0) {
+              list.innerHTML = '<div class="favorites-empty">还没有收藏歌曲，给喜欢的歌点个赞吧 👍</div>';
+            }
+          }, 200);
+        }
+        showToast('已取消收藏');
+      } catch {
+        showToast('操作失败');
+      }
+    });
+  });
 }
 
 document.getElementById('btn-favorites').addEventListener('click', () => {
@@ -535,7 +609,15 @@ function wireSongFeedback(fbContainer, playableSongs) {
       const s = playableSongs[parseInt(btn.dataset.idx)];
       try {
         await sendFeedback(s.title, s.artist, 'like');
-        try { await addFavorite(s.title, s.artist, 'ai_recommend'); } catch {}
+        try {
+          const res = await addFavorite(s.title, s.artist, 'ai_recommend');
+          // Update cache if newly added (res.id not null means it was inserted)
+          if (res && res.id) {
+            const favs = getFavoritesCache();
+            favs.unshift({ id: res.id, title: s.title, artist: s.artist, source: 'ai_recommend' });
+            setFavoritesCache(favs);
+          }
+        } catch { /* server unreachable, skip */ }
         showToast('已标记为喜欢，已加入收藏 ❤️');
       }
       catch { showToast('反馈失败'); }
@@ -557,3 +639,23 @@ function wireSongFeedback(fbContainer, playableSongs) {
 }
 
 loadChat();
+
+// Pull cloud sessions after page load (delayed to not compete with initial render)
+setTimeout(() => {
+  if (getLastSyncTime()) {
+    // Only pull if we've synced before; otherwise wait for first manual or auto sync
+    syncNow().then(r => { if (r.ok) updateSyncIndicator('synced'); }).catch(() => {});
+  } else {
+    // First time: pull cloud sessions (empty push) to restore from other devices
+    syncNow().then(r => {
+      if (r.ok && r.sessionCount > 0) {
+        updateSyncIndicator('synced');
+      }
+    }).catch(() => {});
+  }
+}, 3000);
+
+// Periodic background sync every 5 minutes
+setInterval(() => {
+  syncNow().then(r => { if (r.ok) updateSyncIndicator('synced'); }).catch(() => {});
+}, 5 * 60 * 1000);

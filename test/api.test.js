@@ -139,4 +139,72 @@ describe('api module', () => {
       await expect(api.getTaste()).rejects.toThrow('offline');
     });
   });
+
+  describe('getSessions', () => {
+    it('fetches GET /api/sessions', async () => {
+      globalThis.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ sessions: [] }),
+      });
+
+      await api.getSessions();
+
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/sessions');
+    });
+
+    it('throws on non-ok response', async () => {
+      globalThis.fetch.mockResolvedValueOnce({ ok: false, status: 500 });
+      await expect(api.getSessions()).rejects.toThrow('HTTP 500');
+    });
+  });
+
+  describe('getSession', () => {
+    it('fetches GET /api/sessions/:id', async () => {
+      globalThis.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ id: 'abc', messages: [] }),
+      });
+
+      await api.getSession('abc');
+
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/sessions/abc');
+    });
+  });
+
+  describe('deleteSessionRemote', () => {
+    it('sends DELETE to /api/sessions/:id', async () => {
+      globalThis.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ ok: true }),
+      });
+
+      await api.deleteSessionRemote('abc');
+
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/sessions/abc', { method: 'DELETE' });
+    });
+  });
+
+  describe('syncSessions', () => {
+    it('sends POST to /api/sessions/sync with sessions array', async () => {
+      const sessions = [{ id: '1', messages: [{ role: 'user', content: 'hi' }] }];
+      globalThis.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ sessions, syncedAt: '2026-05-13T00:00:00Z' }),
+      });
+
+      const result = await api.syncSessions(sessions);
+
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/sessions/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessions }),
+      });
+      expect(result.sessions).toEqual(sessions);
+    });
+
+    it('throws on non-ok response', async () => {
+      globalThis.fetch.mockResolvedValueOnce({ ok: false, status: 400 });
+      await expect(api.syncSessions([])).rejects.toThrow('HTTP 400');
+    });
+  });
 });

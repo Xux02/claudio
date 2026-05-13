@@ -51,18 +51,118 @@ function tick() {
   document.getElementById('day-of-week').textContent = now.toLocaleDateString('en-US', { weekday: 'long' });
 }
 
-// ─── Visualizer ───────────────────────────────────────────────
+// ─── Visualizer (Web Audio API) ───────────────────────────────
+
+let audioCtx = null;
+let analyser = null;
+let sourceAttached = false;
+let vizAnimId = null;
+let vizBars = [];
+
+// 7 frequency bins for mirrored center-out spectrum (fftSize=256 → 128 bins)
+// i=0 is bass (center), i=6 is treble (edges)
+const BIN_INDICES = [0, 1, 2, 3, 5, 8, 16];
 
 export function initVisualizer() {
   const c = document.getElementById('visualizer');
   c.innerHTML = '';
-  const heights = [14, 44, 22, 48, 28, 40, 18, 36, 24, 46, 20, 42, 32, 38];
+  vizBars = [];
   for (let i = 0; i < 14; i++) {
     const bar = document.createElement('div');
     bar.className = 'bar';
-    bar.style.height = heights[i] + 'px';
-    bar.style.animationDelay = (i * 0.065).toFixed(2) + 's';
+    bar.style.height = '3px';
     c.appendChild(bar);
+    vizBars.push(bar);
+  }
+}
+
+export function initAudioContext() {
+  if (audioCtx) return;
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return;
+  audioCtx = new AudioCtx();
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  analyser.smoothingTimeConstant = 0.8;
+}
+
+function attachSource() {
+  if (sourceAttached || !audioCtx || !analyser) return;
+  const a = getAudio();
+  if (!a) return;
+
+  // Primary: MediaElementSource (requires crossorigin="anonymous" on <audio>)
+  try {
+    const source = audioCtx.createMediaElementSource(a);
+    source.connect(analyser);
+    analyser.connect(audioCtx.destination);
+    sourceAttached = true;
+    return;
+  } catch (e) {
+    console.warn('MediaElementSource failed, trying captureStream:', e.message);
+  }
+
+  // Fallback: captureStream — avoids CORS but needs audio track to be ready
+  if (a.captureStream) {
+    try {
+      const stream = a.captureStream();
+      const source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
+      const gain = audioCtx.createGain();
+      gain.gain.value = 0;
+      analyser.connect(gain);
+      gain.connect(audioCtx.destination);
+      sourceAttached = true;
+    } catch {}
+  }
+}
+
+export function startVisualizer() {
+  if (!analyser || vizAnimId) return;
+  attachSource();
+
+  const bufferLength = analyser.frequencyBinCount;
+  const dataArray = new Uint8Array(bufferLength);
+
+  function draw() {
+    vizAnimId = requestAnimationFrame(draw);
+    analyser.getByteFrequencyData(dataArray);
+
+    for (let i = 0; i < BIN_INDICES.length; i++) {
+      const val = dataArray[BIN_INDICES[i]] || 0;
+      const norm = val / 255;
+      const h = Math.max(3, norm * 48);
+      const hStr = h.toFixed(1) + 'px';
+
+      // Mirror from center outward: i=0→center bass, i=6→edge treble
+      const leftIdx = 6 - i;
+      const rightIdx = 7 + i;
+
+      vizBars[leftIdx].style.height = hStr;
+      vizBars[rightIdx].style.height = hStr;
+
+      if (norm > 0.35) {
+        const glow = `0 0 ${(norm * 10).toFixed(1)}px rgba(201,168,124,${(norm * 0.7).toFixed(2)})`;
+        vizBars[leftIdx].style.boxShadow = glow;
+        vizBars[rightIdx].style.boxShadow = glow;
+      } else {
+        vizBars[leftIdx].style.boxShadow = 'none';
+        vizBars[rightIdx].style.boxShadow = 'none';
+      }
+    }
+  }
+
+  draw();
+}
+
+export function stopVisualizer() {
+  if (vizAnimId) {
+    cancelAnimationFrame(vizAnimId);
+    vizAnimId = null;
+  }
+  for (const bar of vizBars) {
+    bar.style.height = '3px';
+    bar.style.boxShadow = 'none';
   }
 }
 
@@ -143,8 +243,11 @@ function playIndex(i) {
   currentIndex = i;
   const song = queue[i];
   const a = getAudio();
+  initAudioContext();
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
   a.src = song.url;
   a.load();
+  attachSource();
   a.play().catch(err => { console.error('Play error:', err); playNext(); });
   updateDisplay(song);
   syncPlayState(true);
@@ -198,6 +301,13 @@ function syncPlayState(state) {
   document.getElementById('btn-play').textContent = state ? '⏸' : '▶';
   const viz = document.getElementById('visualizer');
   viz.classList.toggle('playing', state);
+  if (state) {
+    initAudioContext();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    startVisualizer();
+  } else {
+    stopVisualizer();
+  }
 }
 
 function renderPlaylist() {

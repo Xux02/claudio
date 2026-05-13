@@ -62,17 +62,9 @@ body {
   width: 5px;
   background: var(--accent);
   border-radius: 3px;
-  animation: bounce 0.65s ease-in-out infinite alternate;
-  animation-play-state: paused;
-}
-.visualizer.playing .bar { animation-play-state: running; }
-@keyframes bounce {
-  0% { transform: scaleY(0.35); opacity: 0.45; }
-  100% { transform: scaleY(1); opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .visualizer .bar { animation: none; }
-  .progress-fill { transition: none; }
+  min-height: 3px;
+  transition: box-shadow 0.1s ease;
+  will-change: height;
 }
 
 /* big clock */
@@ -449,10 +441,60 @@ body {
 .msg-time { font-size: 9px; color: #444; margin-top: 4px; }
 
 /* input */
+@keyframes border-flow {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
 .input-area {
   display: flex; gap: 8px; align-items: center;
   background: var(--bg-card); border-radius: 20px;
   padding: 7px 14px; flex-shrink: 0;
+  position: relative;
+  z-index: 0;
+}
+
+/* flowing border glow via pseudo-element — masked to show only border */
+.input-area::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  z-index: -1;
+  border-radius: 22px;
+  padding: 2px;
+  background: conic-gradient(
+    from 0deg,
+    transparent,
+    #e0e0e0,
+    #f5f5f5,
+    #ffffff,
+    #f5f5f5,
+    #e0e0e0,
+    transparent
+  );
+  background-size: 200% 200%;
+  animation: border-flow 3s linear infinite;
+  opacity: 0.6;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  transition: opacity 0.4s;
+}
+
+.input-area:focus-within::before {
+  opacity: 0.9;
+  animation-duration: 1.5s;
+  background: conic-gradient(
+    from 0deg,
+    transparent,
+    #f0f0f0,
+    #ffffff,
+    #fafafa,
+    #ffffff,
+    #f0f0f0,
+    transparent
+  );
 }
 .input-area input {
   flex: 1; background: none; border: none;
@@ -725,6 +767,13 @@ body {
   padding: 2px 6px;
 }
 .history-btn:active { color: var(--accent); }
+
+#btn-sync.synced { color: var(--accent); }
+#btn-sync.error { color: #f44336; }
+#btn-sync.syncing {
+  animation: spin 1s linear infinite;
+  color: var(--text-dim);
+}
 
 /* audio element hidden */
 #audio-player { display: none; }

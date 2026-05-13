@@ -60,6 +60,16 @@ export function render(msg) {
   return el;
 }
 
+export async function streamText(bubbleEl, text, speed = 35) {
+  bubbleEl.textContent = '';
+  const chars = [...text];
+  for (let i = 0; i < chars.length; i++) {
+    bubbleEl.textContent += chars[i];
+    scrollBottom();
+    await new Promise(r => setTimeout(r, speed));
+  }
+}
+
 export function scrollBottom() {
   const area = document.getElementById('chat-area');
   requestAnimationFrame(() => {
