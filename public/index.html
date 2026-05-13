@@ -16,7 +16,6 @@
     <div id="weather" class="weather-row">
       <span id="weather-icon"></span>
       <span id="weather-text"></span>
-      <span id="weather-date"></span>
     </div>
 
     <!-- visualizer -->
@@ -25,6 +24,7 @@
     <!-- big clock -->
     <div id="time-display" class="time-display">00:00</div>
     <div id="day-of-week" class="day-of-week">Monday</div>
+    <div id="today-date" class="today-date"></div>
 
     <!-- song info -->
     <div id="song-info" class="song-info">
@@ -32,19 +32,21 @@
       <div id="song-artist" class="song-artist"></div>
     </div>
 
-    <!-- player bar: all controls in one row -->
+    <!-- player bar: two row layout -->
     <div class="player-bar">
-      <button id="btn-prev" class="ctrl-btn" title="上一首">⏮</button>
-      <span id="time-current" class="time-chip">0:00</span>
-      <div class="progress-track">
+      <div class="player-controls">
+        <button id="btn-prev" class="ctrl-btn" title="上一首">⏮</button>
+        <span id="time-current" class="time-chip">0:00</span>
+        <button id="btn-play" class="ctrl-btn play" title="播放/暂停">▶</button>
+        <button id="btn-next" class="ctrl-btn" title="下一首">⏭</button>
+        <span id="time-total" class="time-chip">0:00</span>
+        <button id="btn-playlist" class="ctrl-btn" title="播放列表">☰</button>
+        <span class="vol-icon">🔊</span>
+        <input id="vol-slider" type="range" class="vol-slider" min="0" max="100" value="65">
+      </div>
+      <div id="progress-track" class="progress-track">
         <div id="progress-fill" class="progress-fill"></div>
       </div>
-      <span id="time-total" class="time-chip">0:00</span>
-      <button id="btn-next" class="ctrl-btn" title="下一首">⏭</button>
-      <button id="btn-play" class="ctrl-btn play" title="播放/暂停">▶</button>
-      <button id="btn-playlist" class="ctrl-btn" title="播放列表">☰</button>
-      <span class="vol-icon">🔊</span>
-      <input id="vol-slider" type="range" class="vol-slider" min="0" max="100" value="65">
     </div>
 
     <!-- playlist (collapsed by default) -->
@@ -62,6 +64,13 @@
     <div id="thinking" class="thinking hidden">
       <span class="thinking-dot"></span>
       Claudio 正在思考...
+    </div>
+
+    <!-- chat header -->
+    <div id="chat-header" class="chat-header">
+      <span class="chat-header-name">Claudio</span>
+      <span class="online-dot-breathe"></span>
+      <span class="online-text">在线</span>
     </div>
 
     <!-- chat area -->

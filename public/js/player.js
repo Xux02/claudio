@@ -46,7 +46,7 @@ function tick() {
   const now = new Date();
   const h = String(now.getHours()).padStart(2, '0');
   const m = String(now.getMinutes()).padStart(2, '0');
-  document.getElementById('time-display').textContent = `${h}:${m}`;
+  document.getElementById('time-display').innerHTML = `${h}<span class="colon">:</span>${m}`;
   document.getElementById('day-of-week').textContent = now.toLocaleDateString('en-US', { weekday: 'long' });
 }
 
@@ -151,6 +151,9 @@ function playIndex(i) {
   updateDisplay(song);
   syncPlayState(true);
   renderPlaylist();
+  document.dispatchEvent(new CustomEvent('claudio:nowPlaying', {
+    detail: { title: song.title, artist: song.artist || '' }
+  }));
 }
 
 function playNext() { playIndex(currentIndex + 1); }
@@ -281,3 +284,55 @@ export function setPlaying(state) {
     else syncPlayState(false);
   }
 }
+
+// ─── Progress bar seeking ───────────────────────────────────────
+
+let seekDragging = false;
+
+function getSeekFraction(e) {
+  const track = document.getElementById('progress-track');
+  const rect = track.getBoundingClientRect();
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+}
+
+function handleSeekStart(e) {
+  const a = getAudio();
+  if (!a || !a.duration) return;
+  seekDragging = true;
+  const frac = getSeekFraction(e);
+  a.currentTime = frac * a.duration;
+  const fill = document.getElementById('progress-fill');
+  fill.style.transition = 'none';
+  document.addEventListener('mousemove', handleSeekMove);
+  document.addEventListener('mouseup', handleSeekEnd);
+  document.addEventListener('touchmove', handleSeekMove, { passive: false });
+  document.addEventListener('touchend', handleSeekEnd);
+  e.preventDefault();
+}
+
+function handleSeekMove(e) {
+  if (!seekDragging) return;
+  const a = getAudio();
+  if (!a || !a.duration) return;
+  const frac = getSeekFraction(e);
+  a.currentTime = frac * a.duration;
+}
+
+function handleSeekEnd() {
+  seekDragging = false;
+  const fill = document.getElementById('progress-fill');
+  fill.style.transition = 'width 0.25s linear';
+  document.removeEventListener('mousemove', handleSeekMove);
+  document.removeEventListener('mouseup', handleSeekEnd);
+  document.removeEventListener('touchmove', handleSeekMove);
+  document.removeEventListener('touchend', handleSeekEnd);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const track = document.getElementById('progress-track');
+  if (track) {
+    track.addEventListener('mousedown', handleSeekStart);
+    track.addEventListener('touchstart', handleSeekStart, { passive: false });
+  }
+});

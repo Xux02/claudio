@@ -91,3 +91,44 @@ export function clearInput() {
   const input = document.getElementById('chat-input');
   input.value = '';
 }
+
+export function renderSystemMsg(text) {
+  const area = document.getElementById('chat-area');
+  const el = document.createElement('div');
+  el.className = 'system-msg';
+  el.textContent = text;
+  area.appendChild(el);
+  scrollBottom();
+}
+
+export function initElasticScroll(el) {
+  let startY = 0;
+  let pullDist = 0;
+  let pulling = false;
+
+  el.addEventListener('touchstart', (e) => {
+    if (el.scrollTop <= 0) {
+      startY = e.touches[0].clientY;
+      pulling = true;
+      pullDist = 0;
+    }
+  }, { passive: true });
+
+  el.addEventListener('touchmove', (e) => {
+    if (!pulling) return;
+    const delta = e.touches[0].clientY - startY;
+    if (delta > 0 && el.scrollTop <= 0) {
+      pullDist = Math.min(delta * 0.35, 64);
+      el.style.transform = `translateY(${pullDist}px)`;
+    }
+  }, { passive: true });
+
+  el.addEventListener('touchend', () => {
+    if (!pulling) return;
+    pulling = false;
+    el.style.transition = 'transform 0.3s cubic-bezier(0.25, 0.1, 0.25, 1)';
+    el.style.transform = 'translateY(0)';
+    pullDist = 0;
+    setTimeout(() => { el.style.transition = ''; }, 350);
+  });
+}

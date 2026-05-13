@@ -1,6 +1,6 @@
 import { chatWithRetry, getHistory, deleteMsg } from './api.js';
 import { initVisualizer, addToQueue, setPlaying, togglePlay, playPrevSong, playNextSong, setVolume, startClock, togglePlaylist } from './player.js';
-import { render, clearInput, scrollBottom, showToast, saveAvatar } from './chat.js';
+import { render, clearInput, scrollBottom, showToast, saveAvatar, renderSystemMsg, initElasticScroll } from './chat.js';
 
 // ─── Weather / location ──────────────────────────────────────
 
@@ -9,13 +9,20 @@ document.getElementById('weather-text').textContent = '扬州 · 18°C';
 
 const now = new Date();
 const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-document.getElementById('weather-date').textContent = dateStr;
+document.getElementById('today-date').textContent = dateStr;
 
 // ─── Player init ─────────────────────────────────────────────
 
 initVisualizer();
 startClock();
 setPlaying(false);
+
+// Now playing notification in chat
+document.addEventListener('claudio:nowPlaying', (e) => {
+  const { title, artist } = e.detail;
+  const artistPart = artist ? ` — ${artist}` : '';
+  renderSystemMsg(`Now playing: ${title}${artistPart}`);
+});
 
 // ─── Button events ───────────────────────────────────────────
 
@@ -85,6 +92,7 @@ document.getElementById('chat-input').addEventListener('keydown', (e) => {
 // ─── Message deletion ────────────────────────────────────────
 
 const chatArea = document.getElementById('chat-area');
+initElasticScroll(chatArea);
 
 let deleteTarget = null;
 

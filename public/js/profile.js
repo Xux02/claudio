@@ -99,15 +99,15 @@ export function hide() {
 
 function hideMainUI(state) {
   const ids = [
-    'weather', 'visualizer', 'progress-wrap', 'time-display',
-    'song-info', 'chat-area',
+    'weather', 'visualizer', 'time-display',
+    'day-of-week', 'today-date', 'song-info', 'chat-header', 'chat-area',
   ];
   for (const id of ids) {
     const el = document.getElementById(id);
     if (el) el.style.display = state ? 'none' : '';
   }
-  const controls = document.querySelector('.player-controls');
-  if (controls) controls.style.display = state ? 'none' : '';
+  const playerBar = document.querySelector('.player-bar');
+  if (playerBar) playerBar.style.display = state ? 'none' : '';
   const inputArea = document.querySelector('.input-area');
   if (inputArea) inputArea.style.display = state ? 'none' : '';
 }
