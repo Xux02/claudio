@@ -1,3 +1,4 @@
+import './fetch-polyfill.js';
 import 'dotenv/config';
 import express from 'express';
 import { init as initDb, logMessage, deleteMessage, logPlay, getRecentPlays, getHistory, close as closeDb } from './state.js';
