@@ -119,17 +119,33 @@ app.post('/api/chat', async (req, res) => {
       });
     }
 
-    // claude intent
+    // claude intent — persist user message first so it survives even if AI fails
+    const userMsgId = logMessage({ role: 'user', content: message });
+
     const state = { getRecentPlays };
     const ctx = build({ trigger: 'chat', input: intent.payload, state });
 
-    const result = await ask(ctx);
+    let result;
+    try {
+      result = await ask(ctx);
+    } catch (aiErr) {
+      console.error('AI ask error:', aiErr.message);
+      const fallbackSay = '啧，刚走神了，你再说一遍？';
+      const aiMsgId = logMessage({ role: 'assistant', content: fallbackSay });
+      return res.json({
+        say: fallbackSay,
+        play: [],
+        reason: '',
+        segue: '',
+        userMessageId: userMsgId,
+        messageId: aiMsgId,
+      });
+    }
 
     // Resolve song URLs so the frontend can actually play them
     const playWithUrls = await resolvePlaylist(result.play);
 
-    // Persist
-    const userMsgId = logMessage({ role: 'user', content: message });
+    // Persist AI response
     const aiMsgId = logMessage({
       role: 'assistant',
       content: result.say,

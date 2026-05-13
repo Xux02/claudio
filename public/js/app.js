@@ -69,7 +69,10 @@ async function sendMessage() {
     }
   } catch (err) {
     hideThinking();
-    render({ type: 'ai', sender: 'Claudio', text: '啧，刚走神了，你再说一遍？', time: new Date() });
+    // Server unreachable — show fallback locally (can't persist, server is down)
+    const el = render({ type: 'ai', sender: 'Claudio', text: '啧，刚走神了，你再说一遍？', time: new Date() });
+    if (lastUserEl) lastUserEl.dataset.msgId = '';
+    if (el) el.dataset.msgId = '';
     console.error('Chat error:', err);
   }
 }
