@@ -32,20 +32,27 @@
       <div id="song-artist" class="song-artist"></div>
     </div>
 
-    <!-- player bar: two row layout -->
+    <!-- player bar -->
     <div class="player-bar">
       <div class="player-controls">
+        <div class="song-info-inline">
+          <span id="song-title-inline" class="song-title-inline">Claudio FM</span>
+          <span class="song-sep">·</span>
+          <span id="song-artist-inline" class="song-artist-inline">等待点歌</span>
+        </div>
         <button id="btn-prev" class="ctrl-btn" title="上一首">⏮</button>
-        <span id="time-current" class="time-chip">0:00</span>
         <button id="btn-play" class="ctrl-btn play" title="播放/暂停">▶</button>
         <button id="btn-next" class="ctrl-btn" title="下一首">⏭</button>
-        <span id="time-total" class="time-chip">0:00</span>
         <button id="btn-playlist" class="ctrl-btn" title="播放列表">☰</button>
         <span class="vol-icon">🔊</span>
         <input id="vol-slider" type="range" class="vol-slider" min="0" max="100" value="65">
       </div>
       <div id="progress-track" class="progress-track">
-        <div id="progress-fill" class="progress-fill"></div>
+        <span id="time-current" class="time-chip">0:00</span>
+        <div class="progress-bar-bg">
+          <div id="progress-fill" class="progress-fill"></div>
+        </div>
+        <span id="time-total" class="time-chip">0:00</span>
       </div>
     </div>
 
@@ -69,8 +76,12 @@
     <!-- chat header -->
     <div id="chat-header" class="chat-header">
       <span class="chat-header-name">Claudio</span>
-      <span class="online-dot-breathe"></span>
-      <span class="online-text">在线</span>
+      <div class="chat-header-actions">
+        <button id="btn-new-chat" class="history-btn" title="新对话">+</button>
+        <button id="btn-history" class="history-btn" title="历史对话">历史</button>
+        <span class="online-dot-static"></span>
+        <span class="online-text">在线</span>
+      </div>
     </div>
 
     <!-- chat area -->

@@ -86,9 +86,6 @@ export function addToQueue(songs) {
     if (s.url) queue.push(s);
   }
 
-  // Auto-open playlist when new songs arrive
-  if (!playlistOpen) togglePlaylist();
-
   renderPlaylist();
 
   if (wasIdle && queue.length > 0) {
@@ -171,10 +168,20 @@ function playPrev() {
 // ─── UI helpers ───────────────────────────────────────────────
 
 function updateDisplay(song) {
-  document.getElementById('song-title').textContent = song.title || '';
+  const title = song.title || '';
   const artist = song.artist || '';
   const album = song.album || '';
-  document.getElementById('song-artist').textContent = album ? `${artist} · ${album}` : artist;
+  const artistText = album ? `${artist} · ${album}` : artist;
+  // Original song-info block (standalone)
+  const titleEl = document.getElementById('song-title');
+  const artistEl = document.getElementById('song-artist');
+  if (titleEl) titleEl.textContent = title;
+  if (artistEl) artistEl.textContent = artistText;
+  // Inline song info in controls row
+  const titleInEl = document.getElementById('song-title-inline');
+  const artistInEl = document.getElementById('song-artist-inline');
+  if (titleInEl) titleInEl.textContent = title || 'Claudio FM';
+  if (artistInEl) artistInEl.textContent = artistText || (title ? '' : '等待点歌');
   document.getElementById('progress-fill').style.width = '0%';
   document.getElementById('time-current').textContent = '0:00';
   document.getElementById('time-total').textContent = '0:00';
@@ -290,8 +297,9 @@ export function setPlaying(state) {
 let seekDragging = false;
 
 function getSeekFraction(e) {
-  const track = document.getElementById('progress-track');
-  const rect = track.getBoundingClientRect();
+  const bar = document.querySelector('.progress-bar-bg');
+  if (!bar) return 0;
+  const rect = bar.getBoundingClientRect();
   const clientX = e.touches ? e.touches[0].clientX : e.clientX;
   return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
 }
@@ -330,9 +338,9 @@ function handleSeekEnd() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const track = document.getElementById('progress-track');
-  if (track) {
-    track.addEventListener('mousedown', handleSeekStart);
-    track.addEventListener('touchstart', handleSeekStart, { passive: false });
+  const bar = document.querySelector('.progress-bar-bg');
+  if (bar) {
+    bar.addEventListener('mousedown', handleSeekStart);
+    bar.addEventListener('touchstart', handleSeekStart, { passive: false });
   }
 });

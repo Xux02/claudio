@@ -1,6 +1,7 @@
-import { chatWithRetry, getHistory, deleteMsg } from './api.js';
+import { chatWithRetry, getHistory, deleteMsg, triggerGreeting } from './api.js';
 import { initVisualizer, addToQueue, setPlaying, togglePlay, playPrevSong, playNextSong, setVolume, startClock, togglePlaylist } from './player.js';
 import { render, clearInput, scrollBottom, showToast, saveAvatar, renderSystemMsg, initElasticScroll } from './chat.js';
+import { getCurrentMessages, saveCurrentMessages, archiveAndClear, getSavedSessions, loadSession, showSessionBar, showSessionPicker } from './sessions.js';
 
 // ─── Weather / location ──────────────────────────────────────
 
@@ -74,12 +75,16 @@ async function sendMessage() {
     if (result.play && result.play.length > 0) {
       addToQueue([result.play[0]]);
     }
+
+    // Persist to localStorage after each exchange
+    persistCurrent();
   } catch (err) {
     hideThinking();
-    // Server unreachable — show fallback locally (can't persist, server is down)
+    // Server unreachable — show fallback locally
     const el = render({ type: 'ai', sender: 'Claudio', text: '啧，刚走神了，你再说一遍？', time: new Date() });
     if (lastUserEl) lastUserEl.dataset.msgId = '';
     if (el) el.dataset.msgId = '';
+    persistCurrent();
     console.error('Chat error:', err);
   }
 }
@@ -183,33 +188,142 @@ document.addEventListener('claudio:showProfile', async () => {
   }
 });
 
-// ─── Load history ────────────────────────────────────────────
+// ─── Session helpers ───────────────────────────────────────────
 
-getHistory(50).then(({ messages }) => {
-  if (messages && messages.length > 0) {
-    for (const msg of messages) {
-      const type = msg.role === 'user' ? 'user' : 'ai';
-      const el = render({
-        type,
-        sender: type === 'ai' ? 'Claudio' : '我',
-        text: msg.content,
-        time: new Date(msg.created_at + 'Z'),
-      });
-      el.dataset.msgId = msg.id;
+function collectMessages() {
+  const msgs = [];
+  chatArea.querySelectorAll('.msg').forEach(el => {
+    const role = el.classList.contains('user') ? 'user' : 'assistant';
+    const bubble = el.querySelector('.bubble');
+    if (bubble) msgs.push({ role, content: bubble.textContent });
+  });
+  return msgs;
+}
+
+function persistCurrent() {
+  const msgs = collectMessages();
+  if (msgs.length > 0) saveCurrentMessages(msgs);
+}
+
+function clearChatArea() {
+  chatArea.innerHTML = '';
+  // Also clear any session bar
+  const bar = document.getElementById('session-bar');
+  if (bar) bar.remove();
+}
+
+async function startNewChat() {
+  archiveAndClear();
+  clearChatArea();
+
+  showThinking();
+  try {
+    const result = await triggerGreeting();
+    hideThinking();
+    const say = result.say || '哟，Claudio 在这儿呢。今天想听点什么？';
+    render({ type: 'ai', sender: 'Claudio', text: say, time: new Date() });
+    if (result.play && result.play.length > 0) {
+      addToQueue([result.play[0]]);
     }
-  } else {
+  } catch {
+    hideThinking();
     render({
       type: 'ai',
       sender: 'Claudio',
-      text: '哟，想起来我还有这个电台了？我还以为你把我忘了呢。',
+      text: '哟，Claudio 在这儿呢。这会天气不错，要不要来首歌？',
       time: new Date(),
     });
   }
-}).catch(() => {
-  render({
-    type: 'ai',
-    sender: 'Claudio',
-    text: '哟，想起来我还有这个电台了？我还以为你把我忘了呢。',
-    time: new Date(),
+}
+
+// ─── "新对话" and "历史" buttons ───────────────────────────────
+
+document.getElementById('btn-new-chat').addEventListener('click', () => {
+  persistCurrent();
+  startNewChat();
+});
+
+document.getElementById('btn-history').addEventListener('click', () => {
+  persistCurrent();
+  showSessionPicker((id) => {
+    const messages = loadSession(id);
+    if (!messages) return;
+    clearChatArea();
+    for (const msg of messages) {
+      const type = msg.role === 'user' ? 'user' : 'ai';
+      render({
+        type,
+        sender: type === 'ai' ? 'Claudio' : '我',
+        text: msg.content,
+        time: new Date(),
+      });
+    }
+    saveCurrentMessages(messages);
   });
 });
+
+// ─── Load history ────────────────────────────────────────────
+
+async function loadChat() {
+  // 1. Try localStorage current session first
+  const local = getCurrentMessages();
+  if (local && local.length > 0) {
+    for (const msg of local) {
+      const type = msg.role === 'user' ? 'user' : 'ai';
+      render({
+        type,
+        sender: type === 'ai' ? 'Claudio' : '我',
+        text: msg.content,
+        time: new Date(),
+      });
+    }
+    // Show continue-or-new bar
+    showSessionBar(
+      () => { /* continue — do nothing, messages are already there */ },
+      () => { startNewChat(); }
+    );
+    return;
+  }
+
+  // 2. Try server history
+  try {
+    const { messages } = await getHistory(50);
+    if (messages && messages.length > 0) {
+      for (const msg of messages) {
+        const type = msg.role === 'user' ? 'user' : 'ai';
+        const el = render({
+          type,
+          sender: type === 'ai' ? 'Claudio' : '我',
+          text: msg.content,
+          time: new Date(msg.created_at + 'Z'),
+        });
+        el.dataset.msgId = msg.id;
+      }
+      persistCurrent();
+      showSessionBar(
+        () => {},
+        () => { startNewChat(); }
+      );
+      return;
+    }
+  } catch { /* server unreachable, show greeting */ }
+
+  // 3. No history at all — trigger AI greeting
+  try {
+    const result = await triggerGreeting();
+    const say = result.say || '哟，Claudio 在这儿呢。这会天气不错，要不要来首歌？';
+    render({ type: 'ai', sender: 'Claudio', text: say, time: new Date() });
+    if (result.play && result.play.length > 0) {
+      addToQueue([result.play[0]]);
+    }
+  } catch {
+    render({
+      type: 'ai',
+      sender: 'Claudio',
+      text: '哟，Claudio 在这儿呢。这会天气不错，要不要来首歌？',
+      time: new Date(),
+    });
+  }
+}
+
+loadChat();

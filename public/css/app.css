@@ -85,13 +85,12 @@ body {
   flex-shrink: 0;
 }
 .colon {
-  animation: colon-breath 2s ease-in-out infinite;
+  animation: colon-breath 4s ease-in-out infinite;
 }
 @keyframes colon-breath {
   0%   { opacity: 1; }
-  45%  { opacity: 1; }
-  50%  { opacity: 0; }
-  95%  { opacity: 0; }
+  35%  { opacity: 0.12; }
+  65%  { opacity: 0.12; }
   100% { opacity: 1; }
 }
 
@@ -116,12 +115,12 @@ body {
   flex-shrink: 0;
 }
 
-/* song info */
-.song-info { text-align: center; margin-bottom: 6px; flex-shrink: 0; }
+/* song info — standalone (hidden, using inline version in controls row) */
+.song-info { display: none; }
 .song-title { font-size: 15px; font-weight: 600; }
 .song-artist { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
 
-/* player bar — two row layout */
+/* player bar */
 .player-bar {
   display: flex;
   flex-direction: column;
@@ -133,6 +132,36 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+/* inline song info inside controls row */
+.song-info-inline {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-right: 4px;
+}
+.song-title-inline {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+.song-artist-inline {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+.song-sep {
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 .ctrl-btn {
   width: 30px; height: 30px; border-radius: 50%;
@@ -147,8 +176,17 @@ body {
 }
 .ctrl-btn:active { opacity: 0.7; }
 .progress-track {
-  width: 100%; height: 4px;
-  background: var(--track); border-radius: 2px; overflow: hidden;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.progress-bar-bg {
+  flex: 1;
+  height: 4px;
+  background: var(--track);
+  border-radius: 2px;
+  overflow: hidden;
   cursor: pointer;
 }
 .progress-fill {
@@ -269,11 +307,11 @@ body {
   font-weight: 500;
 }
 .chat-header-name { color: var(--text); }
-.online-dot-breathe {
+.online-dot-static {
   width: 7px; height: 7px;
   border-radius: 50%;
   background: #4caf50;
-  animation: colon-breath 2s ease-in-out infinite;
+  flex-shrink: 0;
 }
 .online-text {
   font-size: 10px;
@@ -445,6 +483,151 @@ body {
 .stat { text-align: center; }
 .stat-num { font-size: 18px; font-weight: 700; color: var(--accent); }
 .stat-label { font-size: 10px; color: #666; margin-top: 2px; }
+
+/* session bar */
+.session-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.session-bar-text {
+  flex: 1;
+  color: var(--text-dim);
+}
+.session-btn {
+  padding: 5px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: #aaa;
+  font-size: 12px;
+  cursor: pointer;
+}
+.session-btn.primary {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+.session-btn:active { opacity: 0.7; }
+
+/* session picker overlay */
+.session-picker-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.session-picker-card {
+  background: var(--bg);
+  border-radius: 14px;
+  width: 100%;
+  max-width: 380px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+}
+.session-picker-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  text-align: center;
+}
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  scrollbar-width: none;
+}
+.session-list::-webkit-scrollbar { display: none; }
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.session-item:active { background: var(--bg-bubble-ai); }
+.session-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.session-item-date {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+.session-item-count {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.session-item-preview {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.session-item-del {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.session-item-del:active { color: #c44; background: #2a1515; }
+.session-picker-close {
+  margin-top: 16px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: #aaa;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+}
+.session-picker-close:active { background: var(--bg-card); }
+
+/* chat header history button */
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.history-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.history-btn:active { color: var(--accent); }
 
 /* audio element hidden */
 #audio-player { display: none; }

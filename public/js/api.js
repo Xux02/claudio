@@ -45,3 +45,13 @@ export async function chatWithRetry(text, maxRetries = 3) {
   }
   throw lastErr;
 }
+
+export async function triggerGreeting() {
+  const res = await fetch('/api/trigger', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason: '用户刚进来，打个招呼' }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
