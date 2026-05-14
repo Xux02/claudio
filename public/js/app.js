@@ -271,10 +271,11 @@ document.addEventListener('claudio:changeAvatar', () => {
 
 // ─── Profile page ────────────────────────────────────────────
 
-document.addEventListener('claudio:showProfile', async () => {
+document.addEventListener('claudio:showProfile', async (e) => {
   try {
     const { show } = await import('./profile.js');
-    show();
+    const avatarEl = e.detail?.avatar;
+    show(avatarEl);
   } catch {
     showToast('资料页即将上线');
   }

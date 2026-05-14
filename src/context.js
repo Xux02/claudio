@@ -86,6 +86,7 @@ export function build({ trigger = '', input = '', state = null, weather = null }
 
   // 2. User corpus
   const taste = [
+    readFile('user/about.md'),
     readFile('user/taste.md'),
     readFile('user/routines.md'),
     readFile('user/mood-rules.md'),

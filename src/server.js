@@ -145,6 +145,36 @@ app.post('/api/chat', async (req, res) => {
     // AI intent — persist user message first so it survives even if AI fails
     const userMsgId = logMessage({ role: 'user', content: message });
 
+    // Auto-retry: if music API just recovered and last recommendation failed, retry it
+    const retryPattern = /^(启动了|修好了|好了|试试|再放|重试|现在放|放吧|好|可以|来|嗯|行|OK|ok|yes|放|搞定了|恢复了)$/;
+    if (musicApiOk && retryPattern.test(message.trim())) {
+      const recent = getRecentMessages(5);
+      const lastAssistant = recent.filter(m => m.role === 'assistant').at(-1);
+      if (lastAssistant) {
+        let lastMeta = null;
+        try { lastMeta = lastAssistant.meta ? JSON.parse(lastAssistant.meta) : null; } catch {}
+        if (lastMeta?.apiDown && lastMeta?.songs?.length > 0) {
+          console.log('[server] Music API recovered, retrying last failed recommendation...');
+          const retriedSongs = await resolvePlaylist(lastMeta.songs);
+          const playable = retriedSongs.filter(s => s.url);
+          if (playable.length > 0) {
+            const names = playable.map(s => `《${s.title}》`).join('、');
+            const say = `音乐服务恢复了！刚才说的${names}，现在放给你听～`;
+            const aiMsgId = logMessage({
+              role: 'assistant', content: say,
+              meta: { songs: playable, reason: 'API恢复自动重试', segue: '' },
+            });
+            for (const song of playable) {
+              logPlay({ title: song.title, artist: song.artist || '', sessionId: getActiveSessionId(), context: getCurrentContext(null) });
+            }
+            return res.json({ say, play: playable, reason: 'API恢复自动重试', segue: '', userMessageId, messageId: aiMsgId });
+          }
+          // Songs still unplayable — fall through to AI for alternatives
+          console.log('[server] Retried songs still unplayable, falling through to AI...');
+        }
+      }
+    }
+
     const city = process.env.CITY || '扬州';
     const weather = await getWeather(city);
     const context = getCurrentContext(weather);
@@ -203,12 +233,15 @@ app.post('/api/chat', async (req, res) => {
       }
     }
 
-    // If music API is down, tell the user explicitly
+    // If music API is down, save failed songs in meta for later retry
     if (!musicApiOk) {
+      const failedSongs = (result.play || []).map(s => ({
+        title: s.title, artist: s.artist || '', reason: s.reason,
+      }));
       const aiMsgId = logMessage({
         role: 'assistant',
         content: result.say,
-        meta: { songs: [], reason: result.reason, segue: result.segue },
+        meta: { songs: failedSongs, reason: result.reason, segue: result.segue, apiDown: true },
       });
       return res.json({
         say: (result.say || '嗯，我在听。') + '\n\n' + musicDownMessage(),

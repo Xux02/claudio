@@ -23,7 +23,7 @@ function createMsgElement(msg) {
   }
   avatar.addEventListener('click', () => {
     if (msg.type === 'ai') {
-      document.dispatchEvent(new CustomEvent('claudio:showProfile'));
+      document.dispatchEvent(new CustomEvent('claudio:showProfile', { detail: { avatar } }));
     } else {
       document.dispatchEvent(new CustomEvent('claudio:changeAvatar', { detail: { type: 'user' } }));
     }

@@ -1,9 +1,36 @@
 import { getProfile } from './api.js';
 
-export async function show() {
-  const profile = document.getElementById('profile-page');
+let overlayEl = null;
+let maskEl = null;
+let cardEl = null;
+let sourceAvatar = null;
 
-  profile.innerHTML = `
+export async function show(fromAvatar) {
+  sourceAvatar = fromAvatar;
+  const rect = fromAvatar.getBoundingClientRect();
+
+  // Calculate transform-origin, clamped to viewport
+  let originX = rect.left + rect.width / 2;
+  let originY = rect.top + rect.height / 2;
+  // If avatar is off-screen, use viewport center
+  if (originY < 0 || originY > window.innerHeight || originX < 0 || originX > window.innerWidth) {
+    originX = window.innerWidth / 2;
+    originY = window.innerHeight / 2;
+  }
+
+  // Create overlay
+  overlayEl = document.createElement('div');
+  overlayEl.className = 'profile-overlay';
+
+  maskEl = document.createElement('div');
+  maskEl.className = 'profile-mask';
+  maskEl.addEventListener('click', () => hide(fromAvatar));
+
+  cardEl = document.createElement('div');
+  cardEl.className = 'profile-card';
+  cardEl.style.transformOrigin = `${originX}px ${originY}px`;
+
+  cardEl.innerHTML = `
     <div class="profile-nav">
       <button id="profile-back" class="back-btn">‹</button>
       <span class="nav-title">AI 资料</span>
@@ -13,11 +40,20 @@ export async function show() {
       <p>加载中...</p>
     </div>
   `;
-  profile.classList.add('active');
-  hideMainUI(true);
 
-  document.getElementById('profile-back').addEventListener('click', hide);
+  overlayEl.appendChild(maskEl);
+  overlayEl.appendChild(cardEl);
+  document.body.appendChild(overlayEl);
 
+  // Trigger animation
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      maskEl.classList.add('show');
+      cardEl.classList.add('show');
+    });
+  });
+
+  // Load data
   let stats;
   try {
     stats = await getProfile();
@@ -26,10 +62,10 @@ export async function show() {
     stats = null;
   }
 
-  renderProfile(profile, stats);
+  renderProfile(stats);
 }
 
-function renderProfile(profile, stats) {
+function renderProfile(stats) {
   const totalPlays = stats?.totalPlays ?? 0;
   const totalSongs = stats?.totalSongs ?? 0;
   const totalChatDays = stats?.totalChatDays ?? 0;
@@ -65,7 +101,7 @@ function renderProfile(profile, stats) {
     `;
   }
 
-  profile.innerHTML = `
+  cardEl.innerHTML = `
     <div class="profile-nav">
       <button id="profile-back" class="back-btn">‹</button>
       <span class="nav-title">AI 资料</span>
@@ -110,7 +146,7 @@ function renderProfile(profile, stats) {
     </div>
   `;
 
-  document.getElementById('profile-back').addEventListener('click', hide);
+  document.getElementById('profile-back').addEventListener('click', () => hide(sourceAvatar));
 
   const avatarEl = document.getElementById('ai-avatar-lg');
   avatarEl.addEventListener('click', () => {
@@ -147,23 +183,45 @@ function escHtml(s) {
   return d.innerHTML;
 }
 
-export function hide() {
-  document.getElementById('profile-page').classList.remove('active');
-  document.getElementById('profile-page').innerHTML = '';
-  hideMainUI(false);
-}
+export function hide(toAvatar) {
+  if (!overlayEl) return;
+  const avatar = toAvatar || sourceAvatar;
 
-function hideMainUI(state) {
-  const ids = [
-    'weather', 'visualizer', 'time-display',
-    'day-of-week', 'today-date', 'song-info', 'chat-header', 'chat-area',
-  ];
-  for (const id of ids) {
-    const el = document.getElementById(id);
-    if (el) el.style.display = state ? 'none' : '';
+  // Update transform-origin to shrink back to current avatar position
+  if (avatar && cardEl) {
+    const rect = avatar.getBoundingClientRect();
+    let ox = rect.left + rect.width / 2;
+    let oy = rect.top + rect.height / 2;
+    if (oy < 0 || oy > window.innerHeight || ox < 0 || ox > window.innerWidth) {
+      ox = window.innerWidth / 2;
+      oy = window.innerHeight / 2;
+    }
+    cardEl.style.transformOrigin = `${ox}px ${oy}px`;
   }
-  const playerBar = document.querySelector('.player-bar');
-  if (playerBar) playerBar.style.display = state ? 'none' : '';
-  const inputArea = document.querySelector('.input-area');
-  if (inputArea) inputArea.style.display = state ? 'none' : '';
+
+  maskEl.classList.remove('show');
+  cardEl.classList.remove('show');
+
+  // Clean up after animation
+  const onTransitionEnd = () => {
+    if (overlayEl) {
+      overlayEl.remove();
+      overlayEl = null;
+      maskEl = null;
+      cardEl = null;
+      sourceAvatar = null;
+    }
+  };
+  cardEl.addEventListener('transitionend', onTransitionEnd, { once: true });
+
+  // Fallback cleanup in case transitionend doesn't fire
+  setTimeout(() => {
+    if (overlayEl) {
+      overlayEl.remove();
+      overlayEl = null;
+      maskEl = null;
+      cardEl = null;
+      sourceAvatar = null;
+    }
+  }, 500);
 }
